@@ -37,7 +37,6 @@ func produceScanSBOM(ctx context.Context, id clio.Identification, src source.Sou
 		return nil, err
 	}
 	var base *sbom.SBOM
-	var err error
 	if mode == string(ociattestation.ReplacementMode) {
 		// Avoid cataloging the image if the operator explicitly requested
 		// replacement. Preserve the resolved image identity and scan descriptor.
