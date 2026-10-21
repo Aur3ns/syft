@@ -10,8 +10,8 @@ import (
 
 // DecodedSBOM retains the OCI artifact provenance alongside the imported
 // document. Content-digest validation must not be confused with signature
-// verification. Keep this metadata until the output representation can
-// express it without falsely presenting unverified data as trusted.
+// verification. Keep this metadata and verified state until an output representation can
+// express signing provenance without ambiguity.
 type DecodedSBOM struct {
 	Document          *sbom.SBOM
 	ImageDigest       string
@@ -30,9 +30,6 @@ func DecodeSBOMs(results []Result) ([]DecodedSBOM, error) {
 		if result.Format != "cyclonedx-json" && result.Format != "spdx-json" {
 			return nil, fmt.Errorf("attested SBOM %d has unsupported format %q", i, result.Format)
 		}
-		if result.SignatureVerified {
-			return nil, fmt.Errorf("attested SBOM %d claims unverified signature status as verified", i)
-		}
 		doc, formatID, _, err := format.Decode(bytes.NewReader(result.Document))
 		if err != nil {
 			return nil, fmt.Errorf("decode attested SBOM %d: %w", i, err)
@@ -48,7 +45,7 @@ func DecodeSBOMs(results []Result) ([]DecodedSBOM, error) {
 			ImageDigest:       result.ImageDigest,
 			ArtifactDigest:    result.ArtifactDigest,
 			PredicateType:     result.PredicateType,
-			SignatureVerified: false,
+			SignatureVerified: result.SignatureVerified,
 		})
 	}
 	return out, nil
