@@ -55,6 +55,7 @@ type Client struct {
 	BaseURL       string
 	Repository    string
 	HTTPClient    *http.Client
+	Verifier      *SigstoreVerifier
 	IndexLimit    int64
 	ManifestLimit int64
 	BlobLimit     int64
@@ -255,6 +256,12 @@ func (c *Client) fetchSBOMLayer(ctx context.Context, base *url.URL, digest, arti
 	result, compatible, err := decodeBundle(contents, digest, artifactDigest)
 	if err != nil || !compatible {
 		return result, compatible, err
+	}
+	if c.Verifier != nil {
+		if err := c.Verifier.VerifyBundle(contents, digest); err != nil {
+			return Result{}, false, fmt.Errorf("untrusted SBOM attestation %s: %w", layer.Digest, err)
+		}
+		result.SignatureVerified = true
 	}
 	if hint != "" && hint != result.PredicateType {
 		return Result{}, false, errors.New("referrer annotation does not match attested predicate type")
