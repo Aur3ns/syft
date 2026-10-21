@@ -49,7 +49,7 @@ func NewClientForImage(ctx context.Context, reference string, description source
 		return nil, "", fmt.Errorf("establish OCI registry authentication: %w", err)
 	}
 	return &Client{
-		BaseURL: repo.Scheme() + "://" + repo.RegistryStr(),
+		BaseURL:    repo.Scheme() + "://" + repo.RegistryStr(),
 		Repository: repo.RepositoryStr(),
 		HTTPClient: &http.Client{Transport: authTransport, Timeout: 30 * time.Second},
 	}, digest, nil
