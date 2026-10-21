@@ -52,16 +52,16 @@ type Result struct {
 // Client uses a caller-supplied HTTP client for registry credentials and TLS.
 // BaseURL identifies the registry origin, not the repository.
 type Client struct {
-	BaseURL       string
-	Repository    string
-	HTTPClient    *http.Client
+	BaseURL    string
+	Repository string
+	HTTPClient *http.Client
 	// BundleVerifier is optional. When set, every imported SBOM MUST pass
 	// signature, identity, TUF and transparency verification.
 	BundleVerifier BundleVerifier
-	IndexLimit    int64
-	ManifestLimit int64
-	BlobLimit     int64
-	TotalLimit    int64
+	IndexLimit     int64
+	ManifestLimit  int64
+	BlobLimit      int64
+	TotalLimit     int64
 }
 
 type descriptor struct {

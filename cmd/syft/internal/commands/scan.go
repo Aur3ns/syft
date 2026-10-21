@@ -69,15 +69,15 @@ const (
 )
 
 type scanOptions struct {
-	options.Config      `yaml:",inline" mapstructure:",squash"`
-	options.Output      `yaml:",inline" mapstructure:",squash"`
-	options.UpdateCheck `yaml:",inline" mapstructure:",squash"`
-	options.Catalog     `yaml:",inline" mapstructure:",squash"`
-	Cache               options.Cache `json:"-" yaml:"cache" mapstructure:"cache"`
-	AttestedSBOM        string        `json:"attested-sbom" yaml:"attested-sbom" mapstructure:"attested-sbom"`
-	AttestedSBOMVerify bool `json:"attested-sbom-verify" yaml:"attested-sbom-verify" mapstructure:"attested-sbom-verify"`
-	AttestedSBOMIssuer string `json:"attested-sbom-issuer" yaml:"attested-sbom-issuer" mapstructure:"attested-sbom-issuer"`
-	AttestedSBOMIdentity string `json:"attested-sbom-identity" yaml:"attested-sbom-identity" mapstructure:"attested-sbom-identity"`
+	options.Config       `yaml:",inline" mapstructure:",squash"`
+	options.Output       `yaml:",inline" mapstructure:",squash"`
+	options.UpdateCheck  `yaml:",inline" mapstructure:",squash"`
+	options.Catalog      `yaml:",inline" mapstructure:",squash"`
+	Cache                options.Cache `json:"-" yaml:"cache" mapstructure:"cache"`
+	AttestedSBOM         string        `json:"attested-sbom" yaml:"attested-sbom" mapstructure:"attested-sbom"`
+	AttestedSBOMVerify   bool          `json:"attested-sbom-verify" yaml:"attested-sbom-verify" mapstructure:"attested-sbom-verify"`
+	AttestedSBOMIssuer   string        `json:"attested-sbom-issuer" yaml:"attested-sbom-issuer" mapstructure:"attested-sbom-issuer"`
+	AttestedSBOMIdentity string        `json:"attested-sbom-identity" yaml:"attested-sbom-identity" mapstructure:"attested-sbom-identity"`
 }
 
 func defaultScanOptions() *scanOptions {

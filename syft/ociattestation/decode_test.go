@@ -75,10 +75,10 @@ func TestDecodeSBOMsEmpty(t *testing.T) {
 
 func TestDecodeSBOMsPreservesValidatedSignatureState(t *testing.T) {
 	results := []Result{{
-		Format: "cyclonedx-json",
-		Document: []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[{"type":"library","name":"secure-lib","version":"1.0"}]}`),
-		ImageDigest: testImageSHA,
-		ArtifactDigest: "sha256:" + strings.Repeat("b", 64),
+		Format:            "cyclonedx-json",
+		Document:          []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[{"type":"library","name":"secure-lib","version":"1.0"}]}`),
+		ImageDigest:       testImageSHA,
+		ArtifactDigest:    "sha256:" + strings.Repeat("b", 64),
 		SignatureVerified: true,
 	}}
 	docs, err := DecodeSBOMs(results)

@@ -72,14 +72,14 @@ func TestProduceScanSBOMRequiresExplicitRegistrySource(t *testing.T) {
 }
 
 func TestAttestedSBOMVerificationPolicyIsFailClosed(t *testing.T) {
-	src := source.FromDescription(source.Description{Name:"local"})
+	src := source.FromDescription(source.Description{Name: "local"})
 	for _, tc := range []struct {
-		name string
-		mode string
-		verify bool
-		issuer string
+		name     string
+		mode     string
+		verify   bool
+		issuer   string
 		identity string
-		want string
+		want     string
 	}{
 		{"cannot verify disabled import", "off", true, "issuer", "identity", "require --attested-sbom"},
 		{"missing issuer", "replacement", true, "", "identity", "requires both"},
