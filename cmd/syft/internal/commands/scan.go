@@ -74,6 +74,7 @@ type scanOptions struct {
 	options.UpdateCheck `yaml:",inline" mapstructure:",squash"`
 	options.Catalog     `yaml:",inline" mapstructure:",squash"`
 	Cache               options.Cache `json:"-" yaml:"cache" mapstructure:"cache"`
+	AttestedSBOM        string        `json:"attested-sbom" yaml:"attested-sbom" mapstructure:"attested-sbom"`
 }
 
 func defaultScanOptions() *scanOptions {
@@ -90,7 +91,7 @@ func Scan(app clio.Application) *cobra.Command {
 
 	opts := defaultScanOptions()
 
-	return app.SetupCommand(&cobra.Command{
+	cmd := app.SetupCommand(&cobra.Command{
 		Use:   "scan [SOURCE]",
 		Short: "Generate an SBOM",
 		Long:  "Generate a packaged-based Software Bill Of Materials (SBOM) from container images and filesystems",
@@ -107,6 +108,9 @@ func Scan(app clio.Application) *cobra.Command {
 			return runScan(cmd.Context(), id, opts, args[0])
 		},
 	}, opts)
+	cmd.Flags().StringVar(&opts.AttestedSBOM, "attested-sbom", "off",
+		"import OCI-attested SBOMs (off, additive, replacement); OCI digests are checked, cryptographic signatures are NOT verified")
+	return cmd
 }
 
 func (o *scanOptions) PostLoad() error {
@@ -210,7 +214,7 @@ func runScan(ctx context.Context, id clio.Identification, opts *scanOptions, use
 		}
 	}()
 
-	s, err := generateSBOM(ctx, id, src, &opts.Catalog)
+	s, err := produceScanSBOM(ctx, id, src, opts, userInput)
 	if err != nil {
 		return err
 	}
