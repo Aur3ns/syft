@@ -61,7 +61,7 @@ func NewSigstoreVerifier(issuer, certificateIdentity string) (*SigstoreVerifier,
 // subject's SHA-256 all validate. OCI content digests alone are insufficient.
 func (v *SigstoreVerifier) VerifyBundle(bundleJSON []byte, imageDigest string) error {
 	if v == nil || v.verifier == nil {
-		return errors.New("Sigstore verification is not configured")
+		return errors.New("sigstore verification is not configured")
 	}
 	if !sha256Digest.MatchString(imageDigest) {
 		return fmt.Errorf("invalid image digest %q", imageDigest)
@@ -78,7 +78,7 @@ func (v *SigstoreVerifier) VerifyBundle(bundleJSON []byte, imageDigest string) e
 		verify.WithArtifactDigest("sha256", digestBytes),
 		verify.WithCertificateIdentity(v.identity),
 	)); err != nil {
-		return fmt.Errorf("Sigstore attestation signature or identity verification failed: %w", err)
+		return fmt.Errorf("sigstore attestation signature or identity verification failed: %w", err)
 	}
 	return nil
 }
