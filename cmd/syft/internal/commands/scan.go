@@ -214,7 +214,7 @@ func runScan(ctx context.Context, id clio.Identification, opts *scanOptions, use
 		}
 	}()
 
-	s, err := produceScanSBOM(ctx, id, src, opts, userInput)
+	s, err := produceScanSBOM(ctx, id, src, opts, userInput, sources...)
 	if err != nil {
 		return err
 	}
