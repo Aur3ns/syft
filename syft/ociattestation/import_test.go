@@ -141,3 +141,26 @@ func TestCombineRejectsCrossImageAttestation(t *testing.T) {
 		t.Fatalf("cross-image claim accepted: %v", err)
 	}
 }
+
+func TestCombineDoesNotImportRelationsAboutScannedPackages(t *testing.T) {
+	scanned := samplePackage("already-scanned", "independent-image-scan")
+	added := samplePackage("only-attested", "unverified-bundle")
+	base := sampleSBOM(scanned)
+	attested := sampleSBOM(scanned, added)
+	attested.Relationships = []artifact.Relationship{
+		{From: scanned, To: added, Type: artifact.DependencyOfRelationship},
+	}
+	got, err := Combine(base, []DecodedSBOM{sampleDocument(attested)}, AdditiveMode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Artifacts.Packages.PackageCount() != 2 {
+		t.Fatalf("expected two packages, got %d", got.Artifacts.Packages.PackageCount())
+	}
+	if len(got.Relationships) != 0 {
+		t.Fatalf("imported %d unverified relationships about independently scanned packages", len(got.Relationships))
+	}
+	if got.Artifacts.Packages.Package(scanned.ID()).FoundBy != "independent-image-scan" {
+		t.Fatal("unverified assertion relabeled independently scanned package")
+	}
+}
