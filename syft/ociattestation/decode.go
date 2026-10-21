@@ -30,9 +30,6 @@ func DecodeSBOMs(results []Result) ([]DecodedSBOM, error) {
 		if result.Format != "cyclonedx-json" && result.Format != "spdx-json" {
 			return nil, fmt.Errorf("attested SBOM %d has unsupported format %q", i, result.Format)
 		}
-		if result.SignatureVerified {
-			return nil, fmt.Errorf("attested SBOM %d claims unverified signature status as verified", i)
-		}
 		doc, formatID, _, err := format.Decode(bytes.NewReader(result.Document))
 		if err != nil {
 			return nil, fmt.Errorf("decode attested SBOM %d: %w", i, err)
@@ -48,7 +45,7 @@ func DecodeSBOMs(results []Result) ([]DecodedSBOM, error) {
 			ImageDigest:       result.ImageDigest,
 			ArtifactDigest:    result.ArtifactDigest,
 			PredicateType:     result.PredicateType,
-			SignatureVerified: false,
+			SignatureVerified: result.SignatureVerified,
 		})
 	}
 	return out, nil
