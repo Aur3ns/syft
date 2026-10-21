@@ -81,11 +81,11 @@ func TestNewClientForImageWithBasicAuthChallenge(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/v2/org/repo/referrers/"+testImageSHA {
-			_,_ = w.Write(encodeJSON(t, fixture.idx))
+			_, _ = w.Write(encodeJSON(t, fixture.idx))
 			return
 		}
 		if data, found := fixture.blobs[r.URL.Path]; found {
-			_,_ = w.Write(data)
+			_, _ = w.Write(data)
 			return
 		}
 		http.NotFound(w, r)
@@ -93,11 +93,11 @@ func TestNewClientForImageWithBasicAuthChallenge(t *testing.T) {
 	t.Cleanup(srv.Close)
 	authority := strings.TrimPrefix(srv.URL, "http://")
 	imageRef := authority + "/org/repo:latest"
-	description := source.Description{Metadata: source.ImageMetadata{ManifestDigest:testImageSHA}}
-	options := &image.RegistryOptions{InsecureUseHTTP:true, Credentials:[]image.RegistryCredentials{{
+	description := source.Description{Metadata: source.ImageMetadata{ManifestDigest: testImageSHA}}
+	options := &image.RegistryOptions{InsecureUseHTTP: true, Credentials: []image.RegistryCredentials{{
 		Authority: authority,
-		Username: username,
-		Password: password,
+		Username:  username,
+		Password:  password,
 	}}}
 	result, err := Import(context.Background(), imageRef, description, options)
 	if err != nil {
