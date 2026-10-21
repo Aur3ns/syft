@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/anchore/clio"
 	"github.com/anchore/syft/internal/log"
@@ -14,13 +15,19 @@ import (
 
 // produceScanSBOM keeps ordinary scans unchanged unless the operator
 // explicitly opts in to importing unverified OCI-attested SBOMs.
-func produceScanSBOM(ctx context.Context, id clio.Identification, src source.Source, opts *scanOptions, userInput string) (*sbom.SBOM, error) {
+func produceScanSBOM(ctx context.Context, id clio.Identification, src source.Source, opts *scanOptions, userInput string, selectedSources ...string) (*sbom.SBOM, error) {
 	mode := opts.AttestedSBOM
 	if mode == "" || mode == "off" {
 		return generateSBOM(ctx, id, src, &opts.Catalog)
 	}
 	if mode != string(ociattestation.AdditiveMode) && mode != string(ociattestation.ReplacementMode) {
 		return nil, fmt.Errorf("invalid --attested-sbom mode %q: choose off, additive or replacement", mode)
+	}
+	// A local Docker/Podman image can have a different manifest digest than
+	// the image currently tagged at a remote registry. Never silently fetch
+	// OCI attestations for a local image with the same mutable tag.
+	if !slices.Contains(selectedSources, "registry") {
+		return nil, fmt.Errorf("--attested-sbom requires an explicit registry source (registry:IMAGE or --from registry)")
 	}
 	var base *sbom.SBOM
 	var err error
