@@ -119,23 +119,25 @@ func TestCombineRejectsUnsafeInputs(t *testing.T) {
 }
 
 func TestCombineAdditiveDoesNotMutateInput(t *testing.T) {
-	scanned := samplePackage("scanned","disk")
-	attested := samplePackage("attested","doc")
+	scanned := samplePackage("scanned", "disk")
+	attested := samplePackage("attested", "doc")
 	base := sampleSBOM(scanned)
-	_,err:=Combine(base,[]DecodedSBOM{sampleDocument(sampleSBOM(attested))},AdditiveMode)
-	if err!=nil {t.Fatal(err)}
-	if base.Artifacts.Packages.PackageCount()!=1 || base.Artifacts.Packages.Package(attested.ID())!=nil {
+	_, err := Combine(base, []DecodedSBOM{sampleDocument(sampleSBOM(attested))}, AdditiveMode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base.Artifacts.Packages.PackageCount() != 1 || base.Artifacts.Packages.Package(attested.ID()) != nil {
 		t.Fatal("additive mode mutated caller's original SBOM")
 	}
 }
 
 func TestCombineRejectsCrossImageAttestation(t *testing.T) {
-	base:=sampleSBOM()
-	base.Source.Metadata=source.ImageMetadata{ManifestDigest:testImageSHA}
-	claim:=sampleDocument(sampleSBOM(samplePackage("openssl","doc")))
-	claim.ImageDigest="sha256:"+strings.Repeat("f",64)
-	_,err:=Combine(base,[]DecodedSBOM{claim},ReplacementMode)
-	if err==nil || !strings.Contains(err.Error(),"expected") {
-		t.Fatalf("cross-image claim accepted: %v",err)
+	base := sampleSBOM()
+	base.Source.Metadata = source.ImageMetadata{ManifestDigest: testImageSHA}
+	claim := sampleDocument(sampleSBOM(samplePackage("openssl", "doc")))
+	claim.ImageDigest = "sha256:" + strings.Repeat("f", 64)
+	_, err := Combine(base, []DecodedSBOM{claim}, ReplacementMode)
+	if err == nil || !strings.Contains(err.Error(), "expected") {
+		t.Fatalf("cross-image claim accepted: %v", err)
 	}
 }
