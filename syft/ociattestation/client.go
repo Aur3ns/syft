@@ -114,7 +114,16 @@ func (c *Client) Discover(ctx context.Context, imageDigest string) ([]Result, er
 		return nil, fmt.Errorf("list OCI referrers: %w", err)
 	}
 	if notFound {
-		return nil, nil
+		// OCI 1.1 registries without the referrers endpoint use the
+		// referrers-tag fallback defined by the OCI distribution spec.
+		referrersTag := strings.Replace(imageDigest, ":", "-", 1)
+		contents, notFound, err = c.request(ctx, base, "/v2/"+c.Repository+"/manifests/"+referrersTag, c.indexLimit(), "", true)
+		if err != nil {
+			return nil, fmt.Errorf("get OCI referrers fallback tag: %w", err)
+		}
+		if notFound {
+			return nil, nil
+		}
 	}
 	remaining := c.totalLimit() - int64(len(contents))
 	if remaining < 0 {
@@ -169,8 +178,8 @@ func (c *Client) Discover(ctx context.Context, imageDigest string) ([]Result, er
 		if m.Subject == nil || m.Subject.Digest != imageDigest {
 			return nil, fmt.Errorf("OCI referrer %s is not attached to image digest %s", desc.Digest, imageDigest)
 		}
-		if len(m.Layers) == 0 {
-			return nil, fmt.Errorf("OCI referrer %s has no layers", desc.Digest)
+		if len(m.Layers) == 0 || len(m.Layers) > 8 {
+			return nil, fmt.Errorf("OCI referrer %s contains invalid layer count %d", desc.Digest, len(m.Layers))
 		}
 		for _, layer := range m.Layers {
 			if layer.MediaType != BundleMediaType {
