@@ -51,11 +51,6 @@ func TestDecodeSBOMsRejectsInvalidDocuments(t *testing.T) {
 			want:   "decode",
 		},
 		{
-			name:   "false trust assertion",
-			result: Result{Format: "cyclonedx-json", SignatureVerified: true},
-			want:   "verified",
-		},
-		{
 			name:   "format mismatch",
 			result: Result{Format: "spdx-json", Document: []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[]}`)},
 			want:   "mismatch",
@@ -75,5 +70,19 @@ func TestDecodeSBOMsEmpty(t *testing.T) {
 	got, err := DecodeSBOMs(nil)
 	if err != nil || len(got) != 0 {
 		t.Fatalf("expected empty result, got %v, %v", got, err)
+	}
+}
+
+func TestDecodeSBOMsPreservesValidatedSignatureState(t *testing.T) {
+	results := []Result{{
+		Format: "cyclonedx-json",
+		Document: []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[{"type":"library","name":"secure-lib","version":"1.0"}]}`),
+		ImageDigest: testImageSHA,
+		ArtifactDigest: "sha256:" + strings.Repeat("b", 64),
+		SignatureVerified: true,
+	}}
+	docs, err := DecodeSBOMs(results)
+	if err != nil || len(docs) != 1 || !docs[0].SignatureVerified {
+		t.Fatalf("expected preserved validated Sigstore state, got %+v: %v", docs, err)
 	}
 }
