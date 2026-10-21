@@ -75,6 +75,9 @@ type scanOptions struct {
 	options.Catalog     `yaml:",inline" mapstructure:",squash"`
 	Cache               options.Cache `json:"-" yaml:"cache" mapstructure:"cache"`
 	AttestedSBOM        string        `json:"attested-sbom" yaml:"attested-sbom" mapstructure:"attested-sbom"`
+	AttestedSBOMVerify bool `json:"attested-sbom-verify" yaml:"attested-sbom-verify" mapstructure:"attested-sbom-verify"`
+	AttestedSBOMIssuer string `json:"attested-sbom-issuer" yaml:"attested-sbom-issuer" mapstructure:"attested-sbom-issuer"`
+	AttestedSBOMIdentity string `json:"attested-sbom-identity" yaml:"attested-sbom-identity" mapstructure:"attested-sbom-identity"`
 }
 
 func defaultScanOptions() *scanOptions {
@@ -109,7 +112,13 @@ func Scan(app clio.Application) *cobra.Command {
 		},
 	}, opts)
 	cmd.Flags().StringVar(&opts.AttestedSBOM, "attested-sbom", "off",
-		"import OCI-attested SBOMs (off, additive, replacement); OCI digests are checked, cryptographic signatures are NOT verified")
+		"import OCI-attested SBOMs (off, additive, replacement); unverified unless --attested-sbom-verify is set")
+	cmd.Flags().BoolVar(&opts.AttestedSBOMVerify, "attested-sbom-verify", false,
+		"require Sigstore DSSE signature, Fulcio identity, Rekor and image-digest verification (fail closed)")
+	cmd.Flags().StringVar(&opts.AttestedSBOMIssuer, "attested-sbom-issuer", "",
+		"expected exact Fulcio OIDC certificate issuer (required with --attested-sbom-verify)")
+	cmd.Flags().StringVar(&opts.AttestedSBOMIdentity, "attested-sbom-identity", "",
+		"expected exact Fulcio signing certificate identity/SAN (required with --attested-sbom-verify)")
 	return cmd
 }
 
