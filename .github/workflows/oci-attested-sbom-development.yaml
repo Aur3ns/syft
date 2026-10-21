@@ -32,6 +32,25 @@ jobs:
         run: go test -race ./syft/ociattestation -count=1
       - name: Static checks
         run: go vet ./syft/ociattestation
+      - name: Compile Syft CLI and integration
+        run: go test ./cmd/syft/internal/commands -run '^      - name: Check formatting
+        run: test -z "$(gofmt -l syft/ociattestation)"
+      - name: Commit formatting to fork-only development branch
+        if: github.repository == 'Aur3ns/syft' && github.ref == 'refs/heads/feat/oci-attested-sbom-ingestion'
+        run: |
+          git add syft/ociattestation
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m "style(oci): gofmt discovery and decoder"
+            git fetch origin feat/oci-attested-sbom-ingestion
+            if [ "$(git rev-parse HEAD^)" != "$(git rev-parse origin/feat/oci-attested-sbom-ingestion)" ]; then
+              echo "A newer commit exists; leave formatting to the current branch's validation."
+              exit 0
+            fi
+            git push origin HEAD:refs/heads/feat/oci-attested-sbom-ingestion
+          fi
+ -count=1
       - name: Check formatting
         run: test -z "$(gofmt -l syft/ociattestation)"
       - name: Commit formatting to fork-only development branch
