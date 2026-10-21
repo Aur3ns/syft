@@ -99,6 +99,11 @@ func Combine(base *sbom.SBOM, docs []DecodedSBOM, mode Mode) (*sbom.SBOM, error)
 			return nil, fmt.Errorf("attested SBOM %d is for image %s, expected %s", i, doc.ImageDigest, imageDigest)
 		}
 		label := "oci-attested-sbom-unverified:" + doc.ArtifactDigest
+		// Relationships from an unverified attestation may only connect
+		// packages introduced by that *same* attestation. In particular,
+		// it must never silently assert relationships about packages that
+		// Syft independently observed in an image.
+		introduced := make(map[artifact.ID]struct{})
 		for p := range doc.Document.Artifacts.Packages.Enumerate() {
 			if !pkg.IsValid(&p) {
 				return nil, fmt.Errorf("attested SBOM %d contains package with no name", i)
@@ -109,15 +114,21 @@ func Combine(base *sbom.SBOM, docs []DecodedSBOM, mode Mode) (*sbom.SBOM, error)
 			}
 			p.FoundBy = label
 			output.Artifacts.Packages.Add(p)
+			introduced[p.ID()] = struct{}{}
 		}
 		for _, rel := range doc.Document.Relationships {
 			if rel.From == nil || rel.To == nil {
 				continue
 			}
+			if _, ok := introduced[rel.From.ID()]; !ok {
+				continue
+			}
+			if _, ok := introduced[rel.To.ID()]; !ok {
+				continue
+			}
 			from := output.Artifacts.Packages.Package(rel.From.ID())
 			to := output.Artifacts.Packages.Package(rel.To.ID())
 			if from == nil || to == nil {
-				// Avoid cross-document file/source relationships.
 				continue
 			}
 			key := relationshipKey(rel)
