@@ -33,7 +33,7 @@ func Import(ctx context.Context, reference string, description source.Descriptio
 	}
 	if len(verifiers) == 1 {
 		if verifiers[0] == nil {
-			return nil, errors.New("Sigstore verifier must not be nil")
+			return nil, errors.New("sigstore verifier must not be nil")
 		}
 		client.BundleVerifier = verifiers[0]
 	}
