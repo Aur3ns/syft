@@ -58,9 +58,16 @@ func Combine(base *sbom.SBOM, docs []DecodedSBOM, mode Mode) (*sbom.SBOM, error)
 	}
 
 	output := *base
+	// An additive import must never mutate its caller's image inventory.
+	output.Relationships = append([]artifact.Relationship(nil), base.Relationships...)
 	if mode == ReplacementMode {
 		output.Artifacts = sbom.Artifacts{Packages: pkg.NewCollection()}
 		output.Relationships = nil
+	} else {
+		output.Artifacts.Packages = pkg.NewCollection()
+		for scanned := range base.Artifacts.Packages.Enumerate() {
+			output.Artifacts.Packages.Add(scanned)
+		}
 	}
 	seen := make(map[string]bool, len(output.Relationships))
 	for _, rel := range output.Relationships {
@@ -74,6 +81,22 @@ func Combine(base *sbom.SBOM, docs []DecodedSBOM, mode Mode) (*sbom.SBOM, error)
 		}
 		if doc.SignatureVerified {
 			return nil, fmt.Errorf("attested SBOM %d cannot claim signature verification", i)
+		}
+		if doc.Document.Artifacts.Packages.PackageCount() > 100000 {
+			return nil, fmt.Errorf("attested SBOM %d exceeds the 100000 package safety limit", i)
+		}
+		// Refuse to combine a document attesting to another image.
+		var imageDigest string
+		switch metadata := base.Source.Metadata.(type) {
+		case source.ImageMetadata:
+			imageDigest = metadata.ManifestDigest
+		case *source.ImageMetadata:
+			if metadata != nil {
+				imageDigest = metadata.ManifestDigest
+			}
+		}
+		if imageDigest != "" && doc.ImageDigest != imageDigest {
+			return nil, fmt.Errorf("attested SBOM %d is for image %s, expected %s", i, doc.ImageDigest, imageDigest)
 		}
 		label := "oci-attested-sbom-unverified:" + doc.ArtifactDigest
 		for p := range doc.Document.Artifacts.Packages.Enumerate() {
