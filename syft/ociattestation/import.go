@@ -88,9 +88,6 @@ func validateAttestedInventory(base *sbom.SBOM, doc DecodedSBOM, index int) erro
 	if doc.Document == nil || doc.Document.Artifacts.Packages == nil {
 		return fmt.Errorf("attested SBOM %d has no packages", index)
 	}
-	if doc.SignatureVerified {
-		return fmt.Errorf("attested SBOM %d cannot claim signature verification", index)
-	}
 	if doc.Document.Artifacts.Packages.PackageCount() > 100000 {
 		return fmt.Errorf("attested SBOM %d exceeds the 100000 package safety limit", index)
 	}
@@ -116,6 +113,9 @@ func expectedImageDigest(metadata any) string {
 func appendAttestedPackages(output *sbom.SBOM, doc DecodedSBOM, index int) (map[artifact.ID]struct{}, error) {
 	introduced := make(map[artifact.ID]struct{})
 	label := "oci-attested-sbom-unverified:" + doc.ArtifactDigest
+	if doc.SignatureVerified {
+		label = "oci-attested-sbom-verified:" + doc.ArtifactDigest
+	}
 	for p := range doc.Document.Artifacts.Packages.Enumerate() {
 		if !pkg.IsValid(&p) {
 			return nil, fmt.Errorf("attested SBOM %d contains package with no name", index)
