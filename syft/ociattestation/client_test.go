@@ -297,3 +297,52 @@ func TestDiscoverReferrersTagFallback(t *testing.T) {
 		t.Fatalf("OCI fallback failed: %v, %v", got, err)
 	}
 }
+
+type stubSigstoreVerifier struct {
+	calls int
+	imageDigest string
+	failure error
+}
+
+func (v *stubSigstoreVerifier) VerifyBundle(bundleJSON []byte, digest string) error {
+	v.calls++
+	v.imageDigest = digest
+	if len(bundleJSON) == 0 {
+		return fmt.Errorf("missing signed bundle bytes")
+	}
+	return v.failure
+}
+
+func TestDiscoverCryptoVerificationIsFailClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		verificationErr error
+		wantVerified bool
+	}{
+		{name:"valid signature and identity",wantVerified:true},
+		{name:"invalid signature",verificationErr:fmt.Errorf("invalid DSSE signature")},
+		{name:"untrusted signing identity",verificationErr:fmt.Errorf("untrusted Fulcio certificate identity")},
+		{name:"missing Rekor inclusion proof",verificationErr:fmt.Errorf("missing Rekor inclusion proof")},
+	}{
+		t.Run(tc.name,func(t *testing.T){
+			f := newRegistryFixture()
+			f.addSBOM(t,testImageSHA,CycloneDXPredicate,[]byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[]}`))
+			v := &stubSigstoreVerifier{failure:tc.verificationErr}
+			client := fixtureClient(f.server(t))
+			client.BundleVerifier = v
+			result,err := client.Discover(context.Background(),testImageSHA)
+			if v.calls != 1 || v.imageDigest != testImageSHA {
+				t.Fatalf("expected verifier bound to image digest: %+v",v)
+			}
+			if tc.verificationErr != nil {
+				if err == nil || len(result) != 0 {
+					t.Fatalf("expected fail-closed attestation rejection, got %+v err %v",result,err)
+				}
+				return
+			}
+			if err != nil || len(result)!=1 || !result[0].SignatureVerified {
+				t.Fatalf("valid signature was not propagated, got %+v err %v",result,err)
+			}
+		})
+	}
+}
