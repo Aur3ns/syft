@@ -1,0 +1,50 @@
+name: Sigstore OCI final signed GHCR proof
+
+on:
+  push:
+    branches: [ci/oci-sigstore-final-validation]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout development source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Resolve dependencies and build CLI
+        run: |
+          go mod tidy
+          go build -o /tmp/syft ./cmd/syft
+      - name: Verify genuine signed GHCR attestation
+        run: |
+          /tmp/syft scan registry:ghcr.io/brawer/sbom-attestation-test:latest --attested-sbom=additive --attested-sbom-verify \
+            --attested-sbom-issuer=https://token.actions.githubusercontent.com \
+            --attested-sbom-identity=https://github.com/brawer/sbom-attestation-test/.github/workflows/build-container.yml@refs/heads/main \
+            -o syft-json > /tmp/valid.json
+          jq -e '[.artifacts[] | select(.name == "log4j-core" and .version == "2.14.1" and (.foundBy | startswith("oci-attested-sbom-verified:")))] | length == 1' /tmp/valid.json
+      - name: Reject untrusted signer identity
+        run: |
+          if /tmp/syft scan registry:ghcr.io/brawer/sbom-attestation-test:latest --attested-sbom=additive --attested-sbom-verify \
+            --attested-sbom-issuer=https://token.actions.githubusercontent.com \
+            --attested-sbom-identity=https://github.com/attacker/evil/.github/workflows/fake.yml@refs/heads/main \
+            -o syft-json > /tmp/invalid.json; then
+            echo "SECURITY REGRESSION: invalid signer accepted"
+            exit 1
+          fi
+      - name: Reject missing trust policy
+        run: |
+          if /tmp/syft scan registry:ghcr.io/brawer/sbom-attestation-test:latest --attested-sbom=additive --attested-sbom-verify -o syft-json > /tmp/missing.json; then
+            echo "SECURITY REGRESSION: missing identity accepted"
+            exit 1
+          fi
