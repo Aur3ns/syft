@@ -1,8 +1,9 @@
 # OCI-attested SBOM ingestion (experimental)
 
-> **Security notice:** OCI SHA-256 integrity and subject binding are validated,
-> but DSSE signatures and signer identity are **not** cryptographically verified.
-> Unverified SBOM claims must not be treated as trusted vulnerability evidence.
+> **Security notice:** OCI SHA-256 integrity and subject binding alone are
+> not signature verification. Use `--attested-sbom-verify` with a trusted
+> exact signer identity to require Sigstore cryptographic authentication.
+> Unsigned or unverified assertions must not be treated as trusted evidence.
 
 ## CLI
 
@@ -45,6 +46,57 @@ have the same ID, scanned provenance is retained.
   invalid JSON, unsupported image sources, or unknown scan modes.
 - Missing attestation: original scan unchanged in additive mode; explicit
   error in replacement mode.
+
+
+## Cryptographically verified Sigstore bundles
+
+Syft can **require cryptographic authentication** in addition to OCI content
+integrity and in-toto image subject matching. Enable this explicitly, and
+supply both the **exact OIDC issuer** and the **exact Fulcio certificate
+identity (SAN)** expected for the trusted signing workflow:
+
+~~~sh
+syft scan registry:ghcr.io/brawer/sbom-attestation-test:latest \
+  --attested-sbom=additive \
+  --attested-sbom-verify \
+  --attested-sbom-issuer=https://token.actions.githubusercontent.com \
+  --attested-sbom-identity=https://github.com/brawer/sbom-attestation-test/.github/workflows/build-container.yml@refs/heads/main \
+  -o syft-json
+~~~
+
+When verification is enabled, every imported SBOM must pass **all** checks:
+
+- Sigstore DSSE signature validated against the signed in-toto statement.
+- Fulcio certificate trust, signed certificate timestamp and expected exact
+  OIDC issuer and certificate identity.
+- Rekor transparency log inclusion and trusted observer timestamp.
+- The signed statement's SHA-256 subject digest matches the image's already
+  resolved manifest digest.
+- The OCI manifest and bundle blob digests and sizes match the descriptors.
+
+Trust is bootstrapped using **Sigstore Public Good's TUF trusted root**. The
+first verification may need network access to fetch or refresh TUF metadata.
+If the trust root cannot be loaded or any verification fails, Syft rejects
+the attestation and returns a nonzero exit status: **no fallback to an
+unverified SBOM**. Syft never automatically trusts a certificate identity
+taken from the untrusted bundle or from the OCI registry annotations.
+
+In verified mode imported packages carry a provenance label beginning
+\`oci-attested-sbom-verified:\`, instead of \`oci-attested-sbom-unverified:\`.
+All independently scanned packages keep their own cataloger provenance.
+Verification checks **who signed the statement** and **which image digest
+was attested**, but does *not* prove that the package inventory asserted by
+that trusted signer is complete or accurate.
+
+If the verification switches are omitted, imports retain the existing
+explicitly opt-in **unverified** behavior with a security warning. This is
+intentional backwards compatibility for additive scanning, not a claim that
+unverified attestations are trustworthy.
+
+This verification mode currently supports **certificate-based, keyless
+Sigstore Public Good bundles**. Custom/private Sigstore roots and public
+key-based verification require separate explicit trust configuration and
+are not silently accepted.
 
 ## Validation
 
