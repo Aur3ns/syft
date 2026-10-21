@@ -28,9 +28,9 @@ func produceScanSBOM(ctx context.Context, id clio.Identification, src source.Sou
 		// Avoid cataloging the image if the operator explicitly requested
 		// replacement. Preserve the resolved image identity and scan descriptor.
 		base = &sbom.SBOM{
-			Source: src.Describe(),
+			Source:     src.Describe(),
 			Descriptor: sbom.Descriptor{Name: id.Name, Version: id.Version},
-			Artifacts: sbom.Artifacts{Packages: pkg.NewCollection()},
+			Artifacts:  sbom.Artifacts{Packages: pkg.NewCollection()},
 		}
 	} else {
 		base, err = generateSBOM(ctx, id, src, &opts.Catalog)

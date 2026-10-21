@@ -34,7 +34,7 @@ func TestProduceScanSBOMReplacementDoesNotSilentlyFallBackToScan(t *testing.T) {
 	t.Cleanup(registry.Close)
 	imageRef := strings.TrimPrefix(registry.URL, "http://") + "/org/repo:latest"
 	src := source.FromDescription(source.Description{
-		Name: imageRef,
+		Name:     imageRef,
 		Metadata: source.ImageMetadata{ManifestDigest: testResolvedImageDigest, UserInput: imageRef},
 	})
 	opts := defaultScanOptions()

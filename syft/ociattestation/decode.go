@@ -44,10 +44,10 @@ func DecodeSBOMs(results []Result) ([]DecodedSBOM, error) {
 			return nil, fmt.Errorf("attested SBOM %d has no package collection", i)
 		}
 		out = append(out, DecodedSBOM{
-			Document: doc,
-			ImageDigest: result.ImageDigest,
-			ArtifactDigest: result.ArtifactDigest,
-			PredicateType: result.PredicateType,
+			Document:          doc,
+			ImageDigest:       result.ImageDigest,
+			ArtifactDigest:    result.ArtifactDigest,
+			PredicateType:     result.PredicateType,
 			SignatureVerified: false,
 		})
 	}

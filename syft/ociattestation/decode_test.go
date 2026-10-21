@@ -8,11 +8,11 @@ import (
 func TestDecodeSBOMsCycloneDX(t *testing.T) {
 	in := []Result{
 		{
-			Format: "cyclonedx-json",
-			Document: []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[{"type":"library","name":"log4j-core","version":"2.14.1"}]}`),
-			ImageDigest: testImageSHA,
+			Format:         "cyclonedx-json",
+			Document:       []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[{"type":"library","name":"log4j-core","version":"2.14.1"}]}`),
+			ImageDigest:    testImageSHA,
 			ArtifactDigest: "sha256:" + strings.Repeat("a", 64),
-			PredicateType: CycloneDXPredicate,
+			PredicateType:  CycloneDXPredicate,
 		},
 	}
 	got, err := DecodeSBOMs(in)
@@ -36,29 +36,29 @@ func TestDecodeSBOMsCycloneDX(t *testing.T) {
 
 func TestDecodeSBOMsRejectsInvalidDocuments(t *testing.T) {
 	tests := []struct {
-		name string
+		name   string
 		result Result
-		want string
+		want   string
 	}{
 		{
-			name: "unsupported format",
+			name:   "unsupported format",
 			result: Result{Format: "syft-json", Document: []byte("{}")},
-			want: "unsupported",
+			want:   "unsupported",
 		},
 		{
-			name: "malformed document",
+			name:   "malformed document",
 			result: Result{Format: "cyclonedx-json", Document: []byte("{invalid")},
-			want: "decode",
+			want:   "decode",
 		},
 		{
-			name: "false trust assertion",
+			name:   "false trust assertion",
 			result: Result{Format: "cyclonedx-json", SignatureVerified: true},
-			want: "verified",
+			want:   "verified",
 		},
 		{
-			name: "format mismatch",
+			name:   "format mismatch",
 			result: Result{Format: "spdx-json", Document: []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[]}`)},
-			want: "mismatch",
+			want:   "mismatch",
 		},
 	}
 	for _, tc := range tests {

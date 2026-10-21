@@ -74,11 +74,11 @@ type index struct {
 }
 
 type manifest struct {
-	MediaType    string       `json:"mediaType"`
-	ArtifactType string       `json:"artifactType"`
+	MediaType    string            `json:"mediaType"`
+	ArtifactType string            `json:"artifactType"`
 	Annotations  map[string]string `json:"annotations"`
-	Subject      *descriptor  `json:"subject"`
-	Layers       []descriptor `json:"layers"`
+	Subject      *descriptor       `json:"subject"`
+	Layers       []descriptor      `json:"layers"`
 }
 
 type bundle struct {
@@ -237,19 +237,27 @@ func (c *Client) validate() error {
 	return nil
 }
 func (c *Client) indexLimit() int64 {
-	if c.IndexLimit > 0 { return c.IndexLimit }
+	if c.IndexLimit > 0 {
+		return c.IndexLimit
+	}
 	return defaultIndexLimit
 }
 func (c *Client) manifestLimit() int64 {
-	if c.ManifestLimit > 0 { return c.ManifestLimit }
+	if c.ManifestLimit > 0 {
+		return c.ManifestLimit
+	}
 	return defaultManifestLimit
 }
 func (c *Client) blobLimit() int64 {
-	if c.BlobLimit > 0 { return c.BlobLimit }
+	if c.BlobLimit > 0 {
+		return c.BlobLimit
+	}
 	return defaultBlobLimit
 }
 func (c *Client) totalLimit() int64 {
-	if c.TotalLimit > 0 { return c.TotalLimit }
+	if c.TotalLimit > 0 {
+		return c.TotalLimit
+	}
 	return defaultTotalLimit
 }
 func checkDescriptor(d descriptor, limit int64) error {
@@ -269,21 +277,39 @@ func (c *Client) request(ctx context.Context, origin *url.URL, path string, limi
 	if err != nil {
 		return nil, false, err
 	}
-	if digest == "" { req.Header.Set("Accept", IndexMediaType) } else { req.Header.Set("Accept", ManifestMediaType+", "+BundleMediaType) }
+	if digest == "" {
+		req.Header.Set("Accept", IndexMediaType)
+	} else {
+		req.Header.Set("Accept", ManifestMediaType+", "+BundleMediaType)
+	}
 	client := c.HTTPClient
-	if client == nil { client = http.DefaultClient }
+	if client == nil {
+		client = http.DefaultClient
+	}
 	resp, err := client.Do(req)
-	if err != nil { return nil, false, err }
+	if err != nil {
+		return nil, false, err
+	}
 	defer resp.Body.Close()
-	if allow404 && resp.StatusCode == http.StatusNotFound { return nil, true, nil }
-	if resp.StatusCode != http.StatusOK { return nil, false, fmt.Errorf("unexpected registry HTTP status %d", resp.StatusCode) }
-	if resp.ContentLength > limit { return nil, false, fmt.Errorf("OCI response exceeds %d bytes", limit) }
+	if allow404 && resp.StatusCode == http.StatusNotFound {
+		return nil, true, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, false, fmt.Errorf("unexpected registry HTTP status %d", resp.StatusCode)
+	}
+	if resp.ContentLength > limit {
+		return nil, false, fmt.Errorf("OCI response exceeds %d bytes", limit)
+	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
-	if err != nil { return nil, false, err }
-	if int64(len(data)) > limit { return nil, false, fmt.Errorf("OCI response exceeds %d bytes", limit) }
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(data)) > limit {
+		return nil, false, fmt.Errorf("OCI response exceeds %d bytes", limit)
+	}
 	if digest != "" {
 		sum := sha256.Sum256(data)
-		if got := "sha256:"+hex.EncodeToString(sum[:]); got != digest {
+		if got := "sha256:" + hex.EncodeToString(sum[:]); got != digest {
 			return nil, false, fmt.Errorf("OCI content digest mismatch: expected %s, got %s", digest, got)
 		}
 	}
@@ -292,43 +318,70 @@ func (c *Client) request(ctx context.Context, origin *url.URL, path string, limi
 
 func decodeBundle(raw []byte, imageDigest, artifactDigest string) (Result, bool, error) {
 	var b bundle
-	if err := json.Unmarshal(raw, &b); err != nil { return Result{}, false, err }
+	if err := json.Unmarshal(raw, &b); err != nil {
+		return Result{}, false, err
+	}
 	if b.DSSEEnvelope.Payload == "" {
-		var other struct { MessageSignature json.RawMessage `json:"messageSignature"` }
+		var other struct {
+			MessageSignature json.RawMessage `json:"messageSignature"`
+		}
 		if json.Unmarshal(raw, &other) == nil && len(other.MessageSignature) > 0 && string(other.MessageSignature) != "null" {
 			return Result{}, false, nil // A non-attestation Sigstore signature bundle.
 		}
 		return Result{}, false, errors.New("Sigstore bundle is missing DSSE payload")
 	}
-	if b.DSSEEnvelope.PayloadType != DSSEPayloadType { return Result{}, false, fmt.Errorf("unsupported DSSE payload type %q", b.DSSEEnvelope.PayloadType) }
+	if b.DSSEEnvelope.PayloadType != DSSEPayloadType {
+		return Result{}, false, fmt.Errorf("unsupported DSSE payload type %q", b.DSSEEnvelope.PayloadType)
+	}
 	payload, err := base64.StdEncoding.Strict().DecodeString(b.DSSEEnvelope.Payload)
-	if err != nil { return Result{}, false, fmt.Errorf("invalid DSSE base64 payload: %w", err) }
+	if err != nil {
+		return Result{}, false, fmt.Errorf("invalid DSSE base64 payload: %w", err)
+	}
 	var s statement
-	if err := json.Unmarshal(payload, &s); err != nil { return Result{}, false, fmt.Errorf("invalid in-toto statement: %w", err) }
-	if s.Type != "https://in-toto.io/Statement/v1" { return Result{}, false, fmt.Errorf("unsupported statement type %q", s.Type) }
-	if !isSBOMPredicate(s.PredicateType) { return Result{}, false, nil }
+	if err := json.Unmarshal(payload, &s); err != nil {
+		return Result{}, false, fmt.Errorf("invalid in-toto statement: %w", err)
+	}
+	if s.Type != "https://in-toto.io/Statement/v1" {
+		return Result{}, false, fmt.Errorf("unsupported statement type %q", s.Type)
+	}
+	if !isSBOMPredicate(s.PredicateType) {
+		return Result{}, false, nil
+	}
 	hexDigest := strings.TrimPrefix(imageDigest, "sha256:")
 	bound := false
 	for _, sub := range s.Subject {
-		if sub.Digest["sha256"] == hexDigest { bound = true; break }
+		if sub.Digest["sha256"] == hexDigest {
+			bound = true
+			break
+		}
 	}
-	if !bound { return Result{}, false, errors.New("in-toto subject digest does not match requested image") }
-	if len(s.Predicate) == 0 || string(s.Predicate) == "null" { return Result{}, false, errors.New("SBOM predicate is empty") }
+	if !bound {
+		return Result{}, false, errors.New("in-toto subject digest does not match requested image")
+	}
+	if len(s.Predicate) == 0 || string(s.Predicate) == "null" {
+		return Result{}, false, errors.New("SBOM predicate is empty")
+	}
 	var probe struct {
-		BomFormat string `json:"bomFormat"`
+		BomFormat   string `json:"bomFormat"`
 		SPDXVersion string `json:"spdxVersion"`
 	}
-	if err := json.Unmarshal(s.Predicate, &probe); err != nil { return Result{}, false, fmt.Errorf("SBOM predicate is not JSON: %w", err) }
+	if err := json.Unmarshal(s.Predicate, &probe); err != nil {
+		return Result{}, false, fmt.Errorf("SBOM predicate is not JSON: %w", err)
+	}
 	var format string
 	switch {
 	case s.PredicateType == CycloneDXPredicate:
-		if probe.BomFormat != "CycloneDX" { return Result{}, false, errors.New("CycloneDX predicate lacks bomFormat") }
+		if probe.BomFormat != "CycloneDX" {
+			return Result{}, false, errors.New("CycloneDX predicate lacks bomFormat")
+		}
 		format = "cyclonedx-json"
 	case strings.HasPrefix(s.PredicateType, spdxPredicatePrefix):
-		if probe.SPDXVersion != "SPDX-"+strings.TrimPrefix(s.PredicateType, spdxPredicatePrefix) { return Result{}, false, errors.New("SPDX predicate lacks spdxVersion") }
+		if probe.SPDXVersion != "SPDX-"+strings.TrimPrefix(s.PredicateType, spdxPredicatePrefix) {
+			return Result{}, false, errors.New("SPDX predicate lacks spdxVersion")
+		}
 		format = "spdx-json"
 	}
-	return Result{Format:format, Document:append([]byte(nil),s.Predicate...), ImageDigest:imageDigest, ArtifactDigest:artifactDigest, PredicateType:s.PredicateType, SignatureVerified:false}, true, nil
+	return Result{Format: format, Document: append([]byte(nil), s.Predicate...), ImageDigest: imageDigest, ArtifactDigest: artifactDigest, PredicateType: s.PredicateType, SignatureVerified: false}, true, nil
 }
 
 // isSBOMPredicate accepts the versioned SPDX identifiers produced by
