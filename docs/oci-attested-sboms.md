@@ -6,7 +6,7 @@
 
 ## CLI
 
-Ordinary Syft scans remain unchanged.
+Ordinary Syft scans remain unchanged. Attested imports deliberately require the explicit registry source; a local Docker daemon image must not be confused with a remote tag that can change.
 
 ~~~sh
 syft scan registry:ghcr.io/example/app:1.0 -o syft-json
