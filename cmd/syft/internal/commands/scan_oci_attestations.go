@@ -18,6 +18,9 @@ import (
 func produceScanSBOM(ctx context.Context, id clio.Identification, src source.Source, opts *scanOptions, userInput string, selectedSources ...string) (*sbom.SBOM, error) {
 	mode := opts.AttestedSBOM
 	if mode == "" || mode == "off" {
+		if opts.AttestedSBOMVerify || opts.AttestedSBOMIssuer != "" || opts.AttestedSBOMIdentity != "" {
+			return nil, fmt.Errorf("Sigstore verification options require --attested-sbom=additive or replacement")
+		}
 		return generateSBOM(ctx, id, src, &opts.Catalog)
 	}
 	if mode != string(ociattestation.AdditiveMode) && mode != string(ociattestation.ReplacementMode) {
@@ -28,6 +31,10 @@ func produceScanSBOM(ctx context.Context, id clio.Identification, src source.Sou
 	// OCI attestations for a local image with the same mutable tag.
 	if !slices.Contains(selectedSources, "registry") {
 		return nil, fmt.Errorf("--attested-sbom requires an explicit registry source (registry:IMAGE or --from registry)")
+	}
+	verifier, err := makeAttestationVerifier(opts)
+	if err != nil {
+		return nil, err
 	}
 	var base *sbom.SBOM
 	var err error
@@ -47,12 +54,34 @@ func produceScanSBOM(ctx context.Context, id clio.Identification, src source.Sou
 	}
 	// The resolver already selected this image digest. Discovery must not
 	// resolve a mutable tag a second time, even when registry tags move.
-	documents, err := ociattestation.Import(ctx, userInput, src.Describe(), opts.Registry.ToOptions())
+	var documents []ociattestation.DecodedSBOM
+	if verifier != nil {
+		documents, err = ociattestation.Import(ctx, userInput, src.Describe(), opts.Registry.ToOptions(), verifier)
+	} else {
+		documents, err = ociattestation.Import(ctx, userInput, src.Describe(), opts.Registry.ToOptions())
+	}
 	if err != nil {
 		return nil, fmt.Errorf("unable to import OCI-attested SBOM: %w", err)
 	}
 	if len(documents) > 0 {
-		log.Warnf("importing %d OCI-attested SBOM(s): OCI content integrity checked but cryptographic signatures NOT verified", len(documents))
+		if verifier != nil {
+			log.Infof("importing %d Sigstore-verified OCI SBOM(s), signer identity %q", len(documents), opts.AttestedSBOMIdentity)
+		} else {
+			log.Warnf("importing %d OCI-attested SBOM(s): OCI content integrity checked but cryptographic signatures NOT verified", len(documents))
+		}
 	}
 	return ociattestation.Combine(base, documents, ociattestation.Mode(mode))
+}
+
+func makeAttestationVerifier(opts *scanOptions) (ociattestation.BundleVerifier, error) {
+	if !opts.AttestedSBOMVerify {
+		if opts.AttestedSBOMIssuer != "" || opts.AttestedSBOMIdentity != "" {
+			return nil, fmt.Errorf("--attested-sbom-issuer and --attested-sbom-identity require --attested-sbom-verify")
+		}
+		return nil, nil
+	}
+	if opts.AttestedSBOMIssuer == "" || opts.AttestedSBOMIdentity == "" {
+		return nil, fmt.Errorf("--attested-sbom-verify requires both --attested-sbom-issuer and --attested-sbom-identity")
+	}
+	return ociattestation.NewSigstoreVerifier(opts.AttestedSBOMIssuer, opts.AttestedSBOMIdentity)
 }
