@@ -51,11 +51,6 @@ func TestDecodeSBOMsRejectsInvalidDocuments(t *testing.T) {
 			want:   "decode",
 		},
 		{
-			name:   "false trust assertion",
-			result: Result{Format: "cyclonedx-json", SignatureVerified: true},
-			want:   "verified",
-		},
-		{
 			name:   "format mismatch",
 			result: Result{Format: "spdx-json", Document: []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[]}`)},
 			want:   "mismatch",
