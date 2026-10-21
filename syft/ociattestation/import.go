@@ -23,10 +23,19 @@ const (
 
 // Import discovers and decodes OCI-attested SBOMs bound to Syft's resolved
 // image digest, preserving provenance for the subsequent merge step.
-func Import(ctx context.Context, reference string, description source.Description, registryOptions *image.RegistryOptions) ([]DecodedSBOM, error) {
+func Import(ctx context.Context, reference string, description source.Description, registryOptions *image.RegistryOptions, verifiers ...BundleVerifier) ([]DecodedSBOM, error) {
 	client, digest, err := NewClientForImage(ctx, reference, description, registryOptions)
 	if err != nil {
 		return nil, err
+	}
+	if len(verifiers) > 1 {
+		return nil, errors.New("at most one Sigstore verifier may be configured")
+	}
+	if len(verifiers) == 1 {
+		if verifiers[0] == nil {
+			return nil, errors.New("Sigstore verifier must not be nil")
+		}
+		client.BundleVerifier = verifiers[0]
 	}
 	attestations, err := client.Discover(ctx, digest)
 	if err != nil {
@@ -35,14 +44,13 @@ func Import(ctx context.Context, reference string, description source.Descriptio
 	return DecodeSBOMs(attestations)
 }
 
-// Combine merges decoded *unverified* attestations with the catalog or
+// Combine merges decoded attestations with the catalog or
 // constructs a replacement catalog. Identical packages already discovered
 // by a local scan are not relabeled, so unverified claims cannot replace the
 // stronger, independently observed provenance.
 //
-// Signature verification is NOT performed here. An opt-in mode does not imply
-// trusted content. Downstream users must never assume these claims are signed
-// or cryptographically verified.
+// Verification is performed at download time by an explicitly configured
+// BundleVerifier. Otherwise, imported packages are marked unverified.
 func Combine(base *sbom.SBOM, docs []DecodedSBOM, mode Mode) (*sbom.SBOM, error) {
 	if base == nil || base.Artifacts.Packages == nil {
 		return nil, errors.New("image SBOM has no package collection")
@@ -88,9 +96,6 @@ func validateAttestedInventory(base *sbom.SBOM, doc DecodedSBOM, index int) erro
 	if doc.Document == nil || doc.Document.Artifacts.Packages == nil {
 		return fmt.Errorf("attested SBOM %d has no packages", index)
 	}
-	if doc.SignatureVerified {
-		return fmt.Errorf("attested SBOM %d cannot claim signature verification", index)
-	}
 	if doc.Document.Artifacts.Packages.PackageCount() > 100000 {
 		return fmt.Errorf("attested SBOM %d exceeds the 100000 package safety limit", index)
 	}
@@ -115,7 +120,11 @@ func expectedImageDigest(metadata any) string {
 
 func appendAttestedPackages(output *sbom.SBOM, doc DecodedSBOM, index int) (map[artifact.ID]struct{}, error) {
 	introduced := make(map[artifact.ID]struct{})
-	label := "oci-attested-sbom-unverified:" + doc.ArtifactDigest
+	trustState := "unverified"
+	if doc.SignatureVerified {
+		trustState = "verified"
+	}
+	label := "oci-attested-sbom-" + trustState + ":" + doc.ArtifactDigest
 	for p := range doc.Document.Artifacts.Packages.Enumerate() {
 		if !pkg.IsValid(&p) {
 			return nil, fmt.Errorf("attested SBOM %d contains package with no name", index)
