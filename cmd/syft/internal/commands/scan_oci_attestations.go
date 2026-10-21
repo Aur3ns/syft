@@ -19,7 +19,7 @@ func produceScanSBOM(ctx context.Context, id clio.Identification, src source.Sou
 	mode := opts.AttestedSBOM
 	if mode == "" || mode == "off" {
 		if opts.AttestedSBOMVerify || opts.AttestedSBOMIssuer != "" || opts.AttestedSBOMIdentity != "" {
-			return nil, fmt.Errorf("Sigstore verification options require --attested-sbom=additive or replacement")
+			return nil, fmt.Errorf("sigstore verification options require --attested-sbom=additive or replacement")
 		}
 		return generateSBOM(ctx, id, src, &opts.Catalog)
 	}
