@@ -44,8 +44,8 @@ func Import(ctx context.Context, reference string, description source.Descriptio
 // trusted content. Downstream users must never assume these claims are signed
 // or cryptographically verified.
 func Combine(base *sbom.SBOM, docs []DecodedSBOM, mode Mode) (*sbom.SBOM, error) {
-	if base == nil {
-		return nil, errors.New("image SBOM is nil")
+	if base == nil || base.Artifacts.Packages == nil {
+		return nil, errors.New("image SBOM has no package collection")
 	}
 	if mode != AdditiveMode && mode != ReplacementMode {
 		return nil, fmt.Errorf("unknown attested SBOM mode %q", mode)
@@ -53,94 +53,119 @@ func Combine(base *sbom.SBOM, docs []DecodedSBOM, mode Mode) (*sbom.SBOM, error)
 	if mode == ReplacementMode && len(docs) == 0 {
 		return nil, errors.New("replacement requested, but no usable attested SBOM was found")
 	}
-	if base.Artifacts.Packages == nil {
-		return nil, errors.New("image SBOM has no package collection")
+	output := cloneImageInventory(base, mode)
+	seen := existingRelationships(output.Relationships)
+	for i, doc := range docs {
+		if err := validateAttestedInventory(base, doc, i); err != nil {
+			return nil, err
+		}
+		introduced, err := appendAttestedPackages(&output, doc, i)
+		if err != nil {
+			return nil, err
+		}
+		appendAttestedRelationships(&output, doc.Document.Relationships, introduced, seen)
 	}
+	return &output, nil
+}
 
+func cloneImageInventory(base *sbom.SBOM, mode Mode) sbom.SBOM {
 	output := *base
-	// An additive import must never mutate its caller's image inventory.
 	output.Relationships = append([]artifact.Relationship(nil), base.Relationships...)
 	if mode == ReplacementMode {
 		output.Artifacts = sbom.Artifacts{Packages: pkg.NewCollection()}
 		output.Relationships = nil
-	} else {
-		output.Artifacts.Packages = pkg.NewCollection()
-		for scanned := range base.Artifacts.Packages.Enumerate() {
-			output.Artifacts.Packages.Add(scanned)
+		return output
+	}
+	// Do not mutate packages in the caller's independently scanned inventory.
+	output.Artifacts.Packages = pkg.NewCollection()
+	for scanned := range base.Artifacts.Packages.Enumerate() {
+		output.Artifacts.Packages.Add(scanned)
+	}
+	return output
+}
+
+func validateAttestedInventory(base *sbom.SBOM, doc DecodedSBOM, index int) error {
+	if doc.Document == nil || doc.Document.Artifacts.Packages == nil {
+		return fmt.Errorf("attested SBOM %d has no packages", index)
+	}
+	if doc.SignatureVerified {
+		return fmt.Errorf("attested SBOM %d cannot claim signature verification", index)
+	}
+	if doc.Document.Artifacts.Packages.PackageCount() > 100000 {
+		return fmt.Errorf("attested SBOM %d exceeds the 100000 package safety limit", index)
+	}
+	imageDigest := expectedImageDigest(base.Source.Metadata)
+	if imageDigest != "" && doc.ImageDigest != imageDigest {
+		return fmt.Errorf("attested SBOM %d is for image %s, expected %s", index, doc.ImageDigest, imageDigest)
+	}
+	return nil
+}
+
+func expectedImageDigest(metadata any) string {
+	switch v := metadata.(type) {
+	case source.ImageMetadata:
+		return v.ManifestDigest
+	case *source.ImageMetadata:
+		if v != nil {
+			return v.ManifestDigest
 		}
 	}
-	seen := make(map[string]bool, len(output.Relationships))
-	for _, rel := range output.Relationships {
+	return ""
+}
+
+func appendAttestedPackages(output *sbom.SBOM, doc DecodedSBOM, index int) (map[artifact.ID]struct{}, error) {
+	introduced := make(map[artifact.ID]struct{})
+	label := "oci-attested-sbom-unverified:" + doc.ArtifactDigest
+	for p := range doc.Document.Artifacts.Packages.Enumerate() {
+		if !pkg.IsValid(&p) {
+			return nil, fmt.Errorf("attested SBOM %d contains package with no name", index)
+		}
+		if output.Artifacts.Packages.Package(p.ID()) != nil {
+			// Independently scanned packages retain their original provenance.
+			continue
+		}
+		p.FoundBy = label
+		output.Artifacts.Packages.Add(p)
+		introduced[p.ID()] = struct{}{}
+	}
+	return introduced, nil
+}
+
+func existingRelationships(relationships []artifact.Relationship) map[string]bool {
+	seen := make(map[string]bool, len(relationships))
+	for _, rel := range relationships {
 		if rel.From != nil && rel.To != nil {
 			seen[relationshipKey(rel)] = true
 		}
 	}
-	for i, doc := range docs {
-		if doc.Document == nil || doc.Document.Artifacts.Packages == nil {
-			return nil, fmt.Errorf("attested SBOM %d has no packages", i)
+	return seen
+}
+
+func appendAttestedRelationships(output *sbom.SBOM, relationships []artifact.Relationship, introduced map[artifact.ID]struct{}, seen map[string]bool) {
+	for _, rel := range relationships {
+		if rel.From == nil || rel.To == nil {
+			continue
 		}
-		if doc.SignatureVerified {
-			return nil, fmt.Errorf("attested SBOM %d cannot claim signature verification", i)
+		if _, ok := introduced[rel.From.ID()]; !ok {
+			continue
 		}
-		if doc.Document.Artifacts.Packages.PackageCount() > 100000 {
-			return nil, fmt.Errorf("attested SBOM %d exceeds the 100000 package safety limit", i)
+		if _, ok := introduced[rel.To.ID()]; !ok {
+			continue
 		}
-		// Refuse to combine a document attesting to another image.
-		var imageDigest string
-		switch metadata := base.Source.Metadata.(type) {
-		case source.ImageMetadata:
-			imageDigest = metadata.ManifestDigest
-		case *source.ImageMetadata:
-			if metadata != nil {
-				imageDigest = metadata.ManifestDigest
-			}
+		from := output.Artifacts.Packages.Package(rel.From.ID())
+		to := output.Artifacts.Packages.Package(rel.To.ID())
+		if from == nil || to == nil {
+			continue
 		}
-		if imageDigest != "" && doc.ImageDigest != imageDigest {
-			return nil, fmt.Errorf("attested SBOM %d is for image %s, expected %s", i, doc.ImageDigest, imageDigest)
+		key := relationshipKey(rel)
+		if seen[key] {
+			continue
 		}
-		label := "oci-attested-sbom-unverified:" + doc.ArtifactDigest
-		// Relationships from an unverified attestation may only connect
-		// packages introduced by that *same* attestation. In particular,
-		// it must never silently assert relationships about packages that
-		// Syft independently observed in an image.
-		introduced := make(map[artifact.ID]struct{})
-		for p := range doc.Document.Artifacts.Packages.Enumerate() {
-			if !pkg.IsValid(&p) {
-				return nil, fmt.Errorf("attested SBOM %d contains package with no name", i)
-			}
-			if output.Artifacts.Packages.Package(p.ID()) != nil {
-				// Existing independently scanned packages take priority.
-				continue
-			}
-			p.FoundBy = label
-			output.Artifacts.Packages.Add(p)
-			introduced[p.ID()] = struct{}{}
-		}
-		for _, rel := range doc.Document.Relationships {
-			if rel.From == nil || rel.To == nil {
-				continue
-			}
-			if _, ok := introduced[rel.From.ID()]; !ok {
-				continue
-			}
-			if _, ok := introduced[rel.To.ID()]; !ok {
-				continue
-			}
-			from := output.Artifacts.Packages.Package(rel.From.ID())
-			to := output.Artifacts.Packages.Package(rel.To.ID())
-			if from == nil || to == nil {
-				continue
-			}
-			key := relationshipKey(rel)
-			if !seen[key] {
-				seen[key] = true
-				output.Relationships = append(output.Relationships, artifact.Relationship{
-					From: *from, To: *to, Type: rel.Type, Data: rel.Data,
-				})
-			}
-		}
+		seen[key] = true
+		output.Relationships = append(output.Relationships, artifact.Relationship{
+			From: *from, To: *to, Type: rel.Type, Data: rel.Data,
+		})
 	}
-	return &output, nil
 }
 
 func relationshipKey(r artifact.Relationship) string {
