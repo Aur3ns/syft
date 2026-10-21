@@ -30,19 +30,27 @@ jobs:
           test -z "$(gofmt -l syft/ociattestation)"
           test -z "$(gofmt -l cmd/syft/internal/commands/scan_oci_attestations.go)"
           test -z "$(gofmt -l cmd/syft/internal/commands/scan_oci_attestations_test.go)"
+      - name: Commit formatting locally before schema-drift lint
+        run: |
+          git add syft/ociattestation cmd/syft/internal/commands/scan_oci_attestations.go cmd/syft/internal/commands/scan_oci_attestations_test.go
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m "style(oci): gofmt attested SBOM implementation"
+          fi
       - name: Tests and race detector
         run: go test -race ./syft/ociattestation ./cmd/syft/internal/commands -run 'Test(Combine|ProduceScanSBOM|Discover|DecodeSBOMs|NewClientForImage)' -count=1
       - name: Static analysis
         run: go vet ./syft/ociattestation ./cmd/syft/internal/commands
       - name: Syft official static analysis
         run: make static-analysis
-      - name: Commit formatting to isolated fork branch
+      - name: Publish validated formatting to isolated fork branch
+        if: github.repository == 'Aur3ns/syft' && github.ref == 'refs/heads/fix/oci-relationship-isolation'
         run: |
-          git add syft/ociattestation cmd/syft/internal/commands/scan_oci_attestations.go cmd/syft/internal/commands/scan_oci_attestations_test.go
-          if ! git diff --cached --quiet; then
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git commit -m "style(oci): gofmt authenticated-registry regression tests"
+          git fetch origin fix/oci-relationship-isolation
+          if [ "$(git rev-parse origin/fix/oci-relationship-isolation)" != "$(git rev-parse HEAD)" ] && [ "$(git rev-parse origin/fix/oci-relationship-isolation)" = "$(git rev-parse HEAD^)" ]; then
             git push origin HEAD:refs/heads/fix/oci-relationship-isolation
+          else
+            echo "No formatting commit to push or branch has advanced."
           fi
 
