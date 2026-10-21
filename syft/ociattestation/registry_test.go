@@ -107,3 +107,23 @@ func TestNewClientForImageWithBasicAuthChallenge(t *testing.T) {
 		t.Fatalf("authenticated import: expected 1 SBOM with one package, got %+v", result)
 	}
 }
+
+func TestImportVerificationRequiresAnAttestedSBOM(t *testing.T) {
+	fixture := newRegistryFixture()
+	srv := fixture.server(t)
+	ref := strings.TrimPrefix(srv.URL, "http://") + "/org/repo:latest"
+	meta := source.Description{Metadata:source.ImageMetadata{ManifestDigest:testImageSHA}}
+	opts := &image.RegistryOptions{InsecureUseHTTP:true}
+	withoutVerification,err:=Import(context.Background(),ref,meta,opts)
+	if err!=nil || len(withoutVerification)!=0 {
+		t.Fatalf("empty unsigned additive import must be unchanged, got %+v: %v",withoutVerification,err)
+	}
+	check := &stubSigstoreVerifier{}
+	_,err=Import(context.Background(),ref,meta,opts,check)
+	if err==nil || !strings.Contains(err.Error(),"no verified OCI-attested SBOM") {
+		t.Fatalf("signed-SBOM requirement silently ignored: %v",err)
+	}
+	if check.calls!=0 {
+		t.Fatalf("verifier called without an attestation: %d",check.calls)
+	}
+}
