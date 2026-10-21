@@ -12,99 +12,119 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anchore/stereoscope/pkg/image"
-	"github.com/anchore/syft/syft/source"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
+
+	"github.com/anchore/stereoscope/pkg/image"
+	"github.com/anchore/syft/syft/source"
 )
 
 // NewClientForImage binds OCI discovery to the image digest obtained during
 // Syft source resolution. It never re-resolves a mutable image tag.
 // Registry auth uses go-containerregistry's challenge-aware transport.
 func NewClientForImage(ctx context.Context, reference string, description source.Description, opts *image.RegistryOptions) (*Client, string, error) {
-	var metadata source.ImageMetadata
-	switch v := description.Metadata.(type) {
-	case source.ImageMetadata:
-		metadata = v
-	case *source.ImageMetadata:
-		if v == nil {
-			return nil, "", errors.New("image source has nil metadata")
-		}
-		metadata = *v
-	default:
-		return nil, "", errors.New("attested SBOMs are only supported for container images")
+	metadata, err := extractImageMetadata(description)
+	if err != nil {
+		return nil, "", err
 	}
 	digest := metadata.ManifestDigest
 	if !sha256Digest.MatchString(digest) {
 		return nil, "", fmt.Errorf("resolved image manifest has invalid digest %q", digest)
 	}
-
-	// Syft accepts explicit source prefixes. They are not OCI registry names.
-	reference = strings.TrimPrefix(reference, "registry:")
-	if reference == "" {
-		reference = metadata.UserInput
-		reference = strings.TrimPrefix(reference, "registry:")
-	}
-	var nameOpts []name.Option
-	if opts != nil && opts.InsecureUseHTTP {
-		nameOpts = append(nameOpts, name.Insecure)
-	}
-	ref, err := name.ParseReference(reference, nameOpts...)
+	repo, err := resolveImageRepository(reference, metadata, opts)
 	if err != nil {
-		return nil, "", fmt.Errorf("parse image registry reference: %w", err)
+		return nil, "", err
 	}
-	repo := ref.Context()
-	// If Syft identified a canonical repository digest, prefer it only when
-	// it refers to the requested registry/repository and to the same resolved
-	// manifest. Do not replace this digest with another digest from a tag lookup.
-	for _, repoDigest := range metadata.RepoDigests {
-		candidate, err := name.ParseReference(repoDigest, nameOpts...)
-		if err != nil || candidate.Context().Name() != repo.Name() {
-			continue
-		}
-		if parsed, ok := candidate.(name.Digest); ok && parsed.DigestStr() == digest {
-			repo = parsed.Context()
-			break
-		}
-	}
-
-	var transportBase http.RoundTripper = http.DefaultTransport
-	if defaultTransport, ok := http.DefaultTransport.(*http.Transport); ok {
-		cloned := defaultTransport.Clone()
-		if opts != nil {
-			if opts.InsecureSkipTLSVerify {
-				if cloned.TLSClientConfig == nil {
-					cloned.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-				}
-				cloned.TLSClientConfig.InsecureSkipVerify = true //nolint:gosec // user explicitly requests insecure registry TLS
-			}
-			if opts.CAFileOrDir != "" {
-				pool, err := registryCACertPool(opts.CAFileOrDir)
-				if err != nil {
-					return nil, "", err
-				}
-				if cloned.TLSClientConfig == nil {
-					cloned.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-				}
-				cloned.TLSClientConfig.RootCAs = pool
-			}
-		}
-		transportBase = cloned
+	baseTransport, err := configuredRegistryTransport(opts)
+	if err != nil {
+		return nil, "", err
 	}
 	auth, err := registryAuthenticator(repo, opts)
 	if err != nil {
 		return nil, "", err
 	}
-	authTransport, err := transport.NewWithContext(ctx, repo.Registry, auth, transportBase, []string{repo.Scope(transport.PullScope)})
+	authTransport, err := transport.NewWithContext(ctx, repo.Registry, auth, baseTransport, []string{repo.Scope(transport.PullScope)})
 	if err != nil {
 		return nil, "", fmt.Errorf("establish OCI registry authentication: %w", err)
 	}
 	return &Client{
-		BaseURL:    repo.Registry.Scheme() + "://" + repo.RegistryStr(),
+		BaseURL: repo.Scheme() + "://" + repo.RegistryStr(),
 		Repository: repo.RepositoryStr(),
 		HTTPClient: &http.Client{Transport: authTransport, Timeout: 30 * time.Second},
 	}, digest, nil
+}
+
+func extractImageMetadata(description source.Description) (source.ImageMetadata, error) {
+	switch metadata := description.Metadata.(type) {
+	case source.ImageMetadata:
+		return metadata, nil
+	case *source.ImageMetadata:
+		if metadata != nil {
+			return *metadata, nil
+		}
+		return source.ImageMetadata{}, errors.New("image source has nil metadata")
+	default:
+		return source.ImageMetadata{}, errors.New("attested SBOMs are only supported for container images")
+	}
+}
+
+func resolveImageRepository(reference string, metadata source.ImageMetadata, opts *image.RegistryOptions) (name.Repository, error) {
+	reference = strings.TrimPrefix(reference, "registry:")
+	if reference == "" {
+		reference = strings.TrimPrefix(metadata.UserInput, "registry:")
+	}
+	var parseOptions []name.Option
+	if opts != nil && opts.InsecureUseHTTP {
+		parseOptions = append(parseOptions, name.Insecure)
+	}
+	ref, err := name.ParseReference(reference, parseOptions...)
+	if err != nil {
+		return name.Repository{}, fmt.Errorf("parse image registry reference: %w", err)
+	}
+	repo := ref.Context()
+	// Do not resolve mutable tags a second time. Keep the original registry
+	// and repository, and only accept matching canonical digest references.
+	for _, digest := range metadata.RepoDigests {
+		candidate, err := name.ParseReference(digest, parseOptions...)
+		if err != nil || candidate.Context().Name() != repo.Name() {
+			continue
+		}
+		if refDigest, ok := candidate.(name.Digest); ok && refDigest.DigestStr() == metadata.ManifestDigest {
+			return refDigest.Context(), nil
+		}
+	}
+	return repo, nil
+}
+
+func configuredRegistryTransport(opts *image.RegistryOptions) (http.RoundTripper, error) {
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return http.DefaultTransport, nil
+	}
+	cloned := defaultTransport.Clone()
+	if opts == nil {
+		return cloned, nil
+	}
+	if opts.InsecureSkipTLSVerify {
+		ensureTLSConfig(cloned)
+		cloned.TLSClientConfig.InsecureSkipVerify = true // User explicitly configured an insecure registry.
+	}
+	if opts.CAFileOrDir != "" {
+		certPool, err := registryCACertPool(opts.CAFileOrDir)
+		if err != nil {
+			return nil, err
+		}
+		ensureTLSConfig(cloned)
+		cloned.TLSClientConfig.RootCAs = certPool
+	}
+	return cloned, nil
+}
+
+func ensureTLSConfig(transport *http.Transport) {
+	if transport.TLSClientConfig == nil {
+		transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	}
 }
 
 func registryAuthenticator(repo name.Repository, opts *image.RegistryOptions) (authn.Authenticator, error) {
