@@ -41,6 +41,9 @@ func Import(ctx context.Context, reference string, description source.Descriptio
 	if err != nil {
 		return nil, fmt.Errorf("discover attested SBOMs: %w", err)
 	}
+	if client.BundleVerifier != nil && len(attestations) == 0 {
+		return nil, errors.New("no verified OCI-attested SBOM was found for the requested image")
+	}
 	return DecodeSBOMs(attestations)
 }
 
