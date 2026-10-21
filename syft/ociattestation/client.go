@@ -1,6 +1,6 @@
 // Package ociattestation discovers SBOM statements attached to OCI images.
-// It checks OCI content digests and image subject binding. It does NOT verify
-// DSSE signatures or establish trust in the SBOM's assertions.
+// It checks OCI content digests and image subject binding. Cryptographic
+// verification is opt-in and requires an explicit Sigstore trust policy.
 package ociattestation
 
 import (
@@ -38,8 +38,8 @@ var (
 	repoPart     = regexp.MustCompile(`^[a-z0-9]+(?:[._-][a-z0-9]+)*$`)
 )
 
-// Result contains an untrusted SBOM. SignatureVerified is always false.
-// Callers must never present content-digest checks as signature verification.
+// Result contains an imported SBOM. SignatureVerified is true only when an
+// explicitly configured BundleVerifier has validated the actual DSSE bundle.
 type Result struct {
 	Format            string
 	Document          []byte
@@ -55,6 +55,9 @@ type Client struct {
 	BaseURL       string
 	Repository    string
 	HTTPClient    *http.Client
+	// BundleVerifier is optional. When set, every imported SBOM MUST pass
+	// signature, identity, TUF and transparency verification.
+	BundleVerifier BundleVerifier
 	IndexLimit    int64
 	ManifestLimit int64
 	BlobLimit     int64
@@ -258,6 +261,12 @@ func (c *Client) fetchSBOMLayer(ctx context.Context, base *url.URL, digest, arti
 	}
 	if hint != "" && hint != result.PredicateType {
 		return Result{}, false, errors.New("referrer annotation does not match attested predicate type")
+	}
+	if c.BundleVerifier != nil {
+		if err := c.BundleVerifier.VerifyBundle(contents, digest); err != nil {
+			return Result{}, false, fmt.Errorf("OCI artifact %s: %w", artifactDigest, err)
+		}
+		result.SignatureVerified = true
 	}
 	return result, true, nil
 }
