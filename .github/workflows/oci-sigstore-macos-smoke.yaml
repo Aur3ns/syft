@@ -1,0 +1,32 @@
+name: OCI Sigstore macOS build and regression (fork only)
+
+on:
+  push:
+    branches: [ci/oci-sigstore-macos-smoke]
+
+permissions:
+  contents: read
+
+jobs:
+  macos-smoke:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - name: Checkout final implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run OCI attestation tests
+        run: go test -count=1 ./syft/ociattestation
+      - name: Compile the entire Syft CLI on macOS
+        run: go build -o /tmp/syft-macos ./cmd/syft
+      - name: Check verified scan CLI options on macOS
+        run: |
+          /tmp/syft-macos scan --help | grep -F -- '--attested-sbom-verify'
+          /tmp/syft-macos scan --help | grep -F -- '--attested-sbom-issuer'
+          /tmp/syft-macos scan --help | grep -F -- '--attested-sbom-identity'
