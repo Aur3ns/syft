@@ -1,0 +1,51 @@
+name: Sigstore OCI attestation verification development
+
+on:
+  push:
+    branches: [feat/oci-sigstore-verification]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sigstore-development
+  cancel-in-progress: true
+
+jobs:
+  verify-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Add vetted Sigstore Go verification library
+        run: |
+          go get github.com/sigstore/sigstore-go@v1.3.0
+          go mod tidy
+      - name: Format new Go files
+        run: |
+          gofmt -w syft/ociattestation
+          gofmt -w cmd/syft/internal/commands/scan_oci_attestations.go
+      - name: Targeted unit tests
+        run: go test -count=1 ./syft/ociattestation ./cmd/syft/internal/commands -run 'Test(Discover|DecodeSBOMs|Combine|NewClientForImage|NewSigstoreVerifier|SigstoreVerifier|ProduceScanSBOM)'
+      - name: Targeted race tests
+        run: go test -race -count=1 ./syft/ociattestation
+      - name: Vet
+        run: go vet ./syft/ociattestation ./cmd/syft/internal/commands
+      - name: Commit resolved module checksums and formatting
+        run: |
+          git add go.mod go.sum syft/ociattestation cmd/syft/internal/commands/scan_oci_attestations.go
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m "build(oci): pin sigstore-go and format verification code"
+            git push origin HEAD:refs/heads/feat/oci-sigstore-verification
+          fi
