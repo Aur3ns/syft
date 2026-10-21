@@ -175,3 +175,30 @@ func TestDiscoverResourceBudgetsAndCancellation(t *testing.T) {
 		if _,err:=fixtureClient(srv).Discover(ctx,testImageSHA);err==nil {t.Fatal("ignored cancellation")}
 	})
 }
+
+func TestVersionedSPDXPredicates(t *testing.T) {
+	t.Run("GitHub Actions SPDX v2.3", func(t *testing.T) {
+		f := newRegistryFixture()
+		f.addSBOM(t, testImageSHA, "https://spdx.dev/Document/v2.3", []byte("{\"spdxVersion\":\"SPDX-2.3\"}"))
+		got, err := fixtureClient(f.server(t)).Discover(context.Background(), testImageSHA)
+		if err != nil || len(got) != 1 || got[0].PredicateType != SPDXPredicate {
+			t.Fatalf("expected GitHub SPDX attestation: %v, %v", got, err)
+		}
+	})
+	t.Run("SPDX v2.2", func(t *testing.T) {
+		f := newRegistryFixture()
+		f.addSBOM(t, testImageSHA, "https://spdx.dev/Document/v2.2", []byte("{\"spdxVersion\":\"SPDX-2.2\"}"))
+		got, err := fixtureClient(f.server(t)).Discover(context.Background(), testImageSHA)
+		if err != nil || len(got) != 1 {
+			t.Fatalf("expected versioned SPDX attestation: %v, %v", got, err)
+		}
+	})
+	t.Run("rejects predicate and version mismatch", func(t *testing.T) {
+		f := newRegistryFixture()
+		f.addSBOM(t, testImageSHA, SPDXPredicate, []byte("{\"spdxVersion\":\"SPDX-2.2\"}"))
+		_, err := fixtureClient(f.server(t)).Discover(context.Background(), testImageSHA)
+		if err == nil || !strings.Contains(err.Error(), "spdxVersion") {
+			t.Fatalf("expected mismatch rejection, got %v", err)
+		}
+	})
+}
