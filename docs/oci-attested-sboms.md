@@ -32,6 +32,35 @@ Imported packages carry a FoundBy provenance label containing the OCI artifact
 digest and the word unverified. If independently scanned and attested packages
 have the same ID, scanned provenance is retained.
 
+## Cryptographically verified import (Sigstore)
+
+The default import remains explicitly unverified for backward compatibility.
+To require cryptographic verification, specify **both** the expected Fulcio
+OIDC issuer and the **exact** signing identity:
+
+~~~sh
+syft scan registry:ghcr.io/example/app:1.0 --attested-sbom=additive \
+  --attested-sbom-issuer=https://token.actions.githubusercontent.com \
+  --attested-sbom-identity=https://github.com/example/repo/.github/workflows/sbom.yml@refs/heads/main \
+  -o syft-json
+~~~
+
+Verified mode obtains Sigstore public-good trusted roots via TUF and requires:
+a valid DSSE signature, a trusted Fulcio certificate with an explicitly allowed
+issuer and exact subject identity, Rekor transparency-log evidence, verified
+observer timestamps, signed certificate timestamps, and in-toto binding to the
+scanned manifest digest. Every relevant bundle must pass or import fails closed.
+
+Verify a specific GitHub Actions workflow identity; do not configure a broad
+issuer-only policy. Verified packages retain their OCI artifact digest and use
+the `oci-attested-sbom-verified:` cataloger provenance. Signer authenticity
+does **not** guarantee that software inventory assertions are factually correct.
+
+The unverified mode remains available without these flags, retains its
+warning and marks imported packages `unverified`. An operator must opt in
+to verification and pin the trusted signing identity. Sigstore TUF root
+availability is required on first use or when cache renewal is necessary.
+
 ## Scope
 
 - OCI 1.1 referrers discovery plus referrers-tag fallback for older registries.
