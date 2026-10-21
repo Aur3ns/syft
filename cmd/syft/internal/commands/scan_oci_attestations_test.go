@@ -60,13 +60,13 @@ func TestProduceScanSBOMRequiresExplicitRegistrySource(t *testing.T) {
 	opts := defaultScanOptions()
 	opts.AttestedSBOM = "replacement"
 	src := source.FromDescription(source.Description{
-		Name: "docker-daemon-image",
-		Metadata: source.ImageMetadata{ManifestDigest:testResolvedImageDigest},
+		Name:     "docker-daemon-image",
+		Metadata: source.ImageMetadata{ManifestDigest: testResolvedImageDigest},
 	})
 	for _, candidate := range []string{"docker:example.org/image:latest", "example.org/image:latest"} {
-		_, err := produceScanSBOM(context.Background(), clio.Identification{Name:"syft"}, src, opts, candidate)
+		_, err := produceScanSBOM(context.Background(), clio.Identification{Name: "syft"}, src, opts, candidate)
 		if err == nil || !strings.Contains(err.Error(), "requires an explicit registry source") {
-			t.Fatalf("input %q should reject implicit/daemon registry access: %v",candidate,err)
+			t.Fatalf("input %q should reject implicit/daemon registry access: %v", candidate, err)
 		}
 	}
 }
