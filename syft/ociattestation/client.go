@@ -24,7 +24,8 @@ const (
 	BundleMediaType            = "application/vnd.dev.sigstore.bundle.v0.3+json"
 	DSSEPayloadType            = "application/vnd.in-toto+json"
 	CycloneDXPredicate         = "https://cyclonedx.org/bom"
-	SPDXPredicate              = "https://spdx.dev/Document"
+	SPDXPredicate              = "https://spdx.dev/Document/v2.3"
+	spdxPredicatePrefix        = "https://spdx.dev/Document/v"
 	defaultIndexLimit    int64 = 2 << 20
 	defaultManifestLimit int64 = 512 << 10
 	defaultBlobLimit     int64 = 16 << 20
@@ -143,7 +144,7 @@ func (c *Client) Discover(ctx context.Context, imageDigest string) ([]Result, er
 			continue
 		}
 		predHint := desc.Annotations["dev.sigstore.bundle.predicateType"]
-		if predHint != "" && predHint != CycloneDXPredicate && predHint != SPDXPredicate {
+		if predHint != "" && !isSBOMPredicate(predHint) {
 			continue
 		}
 		if desc.ArtifactType == "" && desc.Annotations["dev.sigstore.bundle.content"] != "dsse-envelope" {
@@ -292,7 +293,7 @@ func decodeBundle(raw []byte, imageDigest, artifactDigest string) (Result, bool,
 	var s statement
 	if err := json.Unmarshal(payload, &s); err != nil { return Result{}, false, fmt.Errorf("invalid in-toto statement: %w", err) }
 	if s.Type != "https://in-toto.io/Statement/v1" { return Result{}, false, fmt.Errorf("unsupported statement type %q", s.Type) }
-	if s.PredicateType != CycloneDXPredicate && s.PredicateType != SPDXPredicate { return Result{}, false, nil }
+	if !isSBOMPredicate(s.PredicateType) { return Result{}, false, nil }
 	hexDigest := strings.TrimPrefix(imageDigest, "sha256:")
 	bound := false
 	for _, sub := range s.Subject {
@@ -306,13 +307,19 @@ func decodeBundle(raw []byte, imageDigest, artifactDigest string) (Result, bool,
 	}
 	if err := json.Unmarshal(s.Predicate, &probe); err != nil { return Result{}, false, fmt.Errorf("SBOM predicate is not JSON: %w", err) }
 	var format string
-	switch s.PredicateType {
-	case CycloneDXPredicate:
+	switch {
+	case s.PredicateType == CycloneDXPredicate:
 		if probe.BomFormat != "CycloneDX" { return Result{}, false, errors.New("CycloneDX predicate lacks bomFormat") }
 		format = "cyclonedx-json"
-	case SPDXPredicate:
-		if !strings.HasPrefix(probe.SPDXVersion, "SPDX-") { return Result{}, false, errors.New("SPDX predicate lacks spdxVersion") }
+	case strings.HasPrefix(s.PredicateType, spdxPredicatePrefix):
+		if probe.SPDXVersion != "SPDX-"+strings.TrimPrefix(s.PredicateType, spdxPredicatePrefix) { return Result{}, false, errors.New("SPDX predicate lacks spdxVersion") }
 		format = "spdx-json"
 	}
 	return Result{Format:format, Document:append([]byte(nil),s.Predicate...), ImageDigest:imageDigest, ArtifactDigest:artifactDigest, PredicateType:s.PredicateType, SignatureVerified:false}, true, nil
+}
+
+// isSBOMPredicate accepts the versioned SPDX identifiers produced by
+// GitHub Actions, while native format decoders still enforce versions.
+func isSBOMPredicate(predicate string) bool {
+	return predicate == CycloneDXPredicate || (strings.HasPrefix(predicate, spdxPredicatePrefix) && len(predicate) > len(spdxPredicatePrefix))
 }
