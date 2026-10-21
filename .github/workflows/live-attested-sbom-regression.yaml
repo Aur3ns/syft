@@ -1,0 +1,36 @@
+name: Live GHCR attested SBOM regression (fork only)
+
+on:
+  push:
+    branches: [ci/live-attested-sbom-fixture]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-ghcr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out fork testing branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go matching Syft
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build Syft CLI
+        run: go build -o /tmp/syft ./cmd/syft
+      - name: Confirm attested SBOM CLI flag exists
+        run: /tmp/syft scan --help | grep -F -- '--attested-sbom'
+      - name: Scan actual OCI SBOM-attestation regression image
+        run: |
+          /tmp/syft scan registry:ghcr.io/brawer/sbom-attestation-test:latest --attested-sbom=additive -o syft-json > /tmp/enriched-sbom.json
+          jq -e '[.artifacts[] | select(.name == "log4j-core" and .version == "2.14.1")] | length >= 1' /tmp/enriched-sbom.json
+      - name: Verify base scan does not import registry SBOM by default
+        run: |
+          /tmp/syft scan registry:ghcr.io/brawer/sbom-attestation-test:latest -o syft-json > /tmp/default-sbom.json
+          jq -e '[.artifacts[] | select(.name == "log4j-core" and .version == "2.14.1")] | length == 0' /tmp/default-sbom.json
