@@ -55,3 +55,18 @@ func TestProduceScanSBOMRejectsNonImageSources(t *testing.T) {
 		t.Fatalf("expected image-only validation, got %v", err)
 	}
 }
+
+func TestProduceScanSBOMRequiresExplicitRegistrySource(t *testing.T) {
+	opts := defaultScanOptions()
+	opts.AttestedSBOM = "replacement"
+	src := source.FromDescription(source.Description{
+		Name: "docker-daemon-image",
+		Metadata: source.ImageMetadata{ManifestDigest:testResolvedImageDigest},
+	})
+	for _, candidate := range []string{"docker:example.org/image:latest", "example.org/image:latest"} {
+		_, err := produceScanSBOM(context.Background(), clio.Identification{Name:"syft"}, src, opts, candidate)
+		if err == nil || !strings.Contains(err.Error(), "requires an explicit registry source") {
+			t.Fatalf("input %q should reject implicit/daemon registry access: %v",candidate,err)
+		}
+	}
+}
