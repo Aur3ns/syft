@@ -1,0 +1,81 @@
+name: OCI Sigstore verification development (fork only)
+
+on:
+  push:
+    branches: [feat/oci-attestation-signature-verification]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify-sigstore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout fork development branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Resolve exact Sigstore Go module dependencies
+        run: go mod tidy
+      - name: Format changed Go files
+        run: |
+          gofmt -w syft/ociattestation
+          gofmt -w cmd/syft/internal/commands/scan.go
+          gofmt -w cmd/syft/internal/commands/scan_oci_attestations.go
+          gofmt -w cmd/syft/internal/commands/scan_oci_attestations_test.go
+      - name: Commit dependency and formatting changes in local tree for schema-drift check
+        run: |
+          git add go.mod go.sum syft/ociattestation cmd/syft/internal/commands/scan.go cmd/syft/internal/commands/scan_oci_attestations.go cmd/syft/internal/commands/scan_oci_attestations_test.go
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m "chore(oci): resolve Sigstore dependency and Go formatting"
+          fi
+      - name: Focused unit and race tests
+        run: go test -race ./syft/ociattestation ./cmd/syft/internal/commands -run 'Test(Discover|DecodeSBOMs|Combine|NewClientForImage|NewSigstoreVerifier|SigstoreVerifier|ProduceScanSBOM|AttestedSBOM)' -count=1
+      - name: Go vet
+        run: go vet ./syft/ociattestation ./cmd/syft/internal/commands
+      - name: Official Syft static analysis
+        run: make static-analysis
+      - name: Build full Syft CLI
+        run: go build -o /tmp/syft ./cmd/syft
+      - name: Verify new flags exist
+        run: |
+          /tmp/syft scan --help | grep -F -- '--attested-sbom-verify'
+          /tmp/syft scan --help | grep -F -- '--attested-sbom-issuer'
+          /tmp/syft scan --help | grep -F -- '--attested-sbom-identity'
+      - name: Verify real GHCR SBOM with expected GitHub Actions signer
+        run: |
+          /tmp/syft scan registry:ghcr.io/brawer/sbom-attestation-test:latest --attested-sbom=additive --attested-sbom-verify \
+            --attested-sbom-issuer=https://token.actions.githubusercontent.com \
+            --attested-sbom-identity=https://github.com/brawer/sbom-attestation-test/.github/workflows/build-container.yml@refs/heads/main \
+            -o syft-json > /tmp/verified-sbom.json
+          jq -e '[.artifacts[] | select(.name=="log4j-core" and .version=="2.14.1" and (.foundBy | startswith("oci-attested-sbom-verified:")))] | length == 1' /tmp/verified-sbom.json
+      - name: Reject a different GitHub Actions signer
+        run: |
+          if /tmp/syft scan registry:ghcr.io/brawer/sbom-attestation-test:latest --attested-sbom=additive --attested-sbom-verify \
+            --attested-sbom-issuer=https://token.actions.githubusercontent.com \
+            --attested-sbom-identity=https://github.com/attacker/repository/.github/workflows/build.yml@refs/heads/main \
+            -o syft-json > /tmp/wrong-signer-sbom.json; then
+            echo "SECURITY REGRESSION: accepted wrong signer identity"
+            exit 1
+          fi
+      - name: Publish normalized dependencies after all security checks pass
+        run: |
+          git fetch origin feat/oci-attestation-signature-verification
+          if [ "$(git rev-parse origin/feat/oci-attestation-signature-verification)" = "$(git rev-parse HEAD)" ]; then
+            echo "No generated changes"
+            exit 0
+          fi
+          if [ "$(git rev-parse origin/feat/oci-attestation-signature-verification)" != "$(git rev-parse HEAD^)" ]; then
+            echo "Branch changed since validation, skip stale push"
+            exit 0
+          fi
+          git push origin HEAD:refs/heads/feat/oci-attestation-signature-verification
