@@ -24,10 +24,17 @@ const (
 // Import discovers and decodes OCI-attested SBOMs bound to Syft's resolved
 // image digest, preserving provenance for the subsequent merge step.
 func Import(ctx context.Context, reference string, description source.Description, registryOptions *image.RegistryOptions) ([]DecodedSBOM, error) {
+	return ImportWithVerifier(ctx, reference, description, registryOptions, nil)
+}
+
+// ImportWithVerifier cryptographically verifies each relevant bundle when
+// verifier is non-nil. Any invalid signature or signer identity aborts import.
+func ImportWithVerifier(ctx context.Context, reference string, description source.Description, registryOptions *image.RegistryOptions, verifier *SigstoreVerifier) ([]DecodedSBOM, error) {
 	client, digest, err := NewClientForImage(ctx, reference, description, registryOptions)
 	if err != nil {
 		return nil, err
 	}
+	client.Verifier = verifier
 	attestations, err := client.Discover(ctx, digest)
 	if err != nil {
 		return nil, fmt.Errorf("discover attested SBOMs: %w", err)
