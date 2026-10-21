@@ -2,6 +2,8 @@ package ociattestation
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -60,5 +62,48 @@ func TestNewClientForImageRejectsInvalidInputs(t *testing.T) {
 				t.Fatal("expected invalid metadata/reference error")
 			}
 		})
+	}
+}
+
+func TestNewClientForImageWithBasicAuthChallenge(t *testing.T) {
+	fixture := newRegistryFixture()
+	fixture.addSBOM(t, testImageSHA, CycloneDXPredicate, []byte(`{"bomFormat":"CycloneDX","specVersion":"1.7","version":1,"components":[{"type":"library","name":"private-lib","version":"1.0"}]}`))
+	const username, password = "reader", "do-not-log-secret"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != username || pass != password {
+			w.Header().Set("WWW-Authenticate", `Basic realm="test-registry"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path == "/v2/" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.URL.Path == "/v2/org/repo/referrers/"+testImageSHA {
+			_,_ = w.Write(encodeJSON(t, fixture.idx))
+			return
+		}
+		if data, found := fixture.blobs[r.URL.Path]; found {
+			_,_ = w.Write(data)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	authority := strings.TrimPrefix(srv.URL, "http://")
+	imageRef := authority + "/org/repo:latest"
+	description := source.Description{Metadata: source.ImageMetadata{ManifestDigest:testImageSHA}}
+	options := &image.RegistryOptions{InsecureUseHTTP:true, Credentials:[]image.RegistryCredentials{{
+		Authority: authority,
+		Username: username,
+		Password: password,
+	}}}
+	result, err := Import(context.Background(), imageRef, description, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 1 || result[0].Document.Artifacts.Packages.PackageCount() != 1 {
+		t.Fatalf("authenticated import: expected 1 SBOM with one package, got %+v", result)
 	}
 }
