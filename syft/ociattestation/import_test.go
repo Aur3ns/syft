@@ -107,7 +107,6 @@ func TestCombineRejectsUnsafeInputs(t *testing.T) {
 		{"bad mode", sampleSBOM(), nil, "guess"},
 		{"replace without attestation", sampleSBOM(), nil, ReplacementMode},
 		{"nil attested document", sampleSBOM(), []DecodedSBOM{{}}, AdditiveMode},
-		{"false signature claim", sampleSBOM(), []DecodedSBOM{{Document: sampleSBOM(), SignatureVerified: true}}, AdditiveMode},
 		{"missing package name", sampleSBOM(), []DecodedSBOM{sampleDocument(sampleSBOM(pkg.Package{}))}, AdditiveMode},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -162,5 +161,18 @@ func TestCombineDoesNotImportRelationsAboutScannedPackages(t *testing.T) {
 	}
 	if got.Artifacts.Packages.Package(scanned.ID()).FoundBy != "independent-image-scan" {
 		t.Fatal("unverified assertion relabeled independently scanned package")
+	}
+}
+
+func TestCombineMarksVerifiedAttestation(t *testing.T) {
+	lib := samplePackage("verified-library", "untrusted")
+	doc := sampleDocument(sampleSBOM(lib))
+	doc.SignatureVerified = true
+	got, err := Combine(sampleSBOM(), []DecodedSBOM{doc}, ReplacementMode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := got.Artifacts.Packages.Package(lib.ID()); p == nil || !strings.HasPrefix(p.FoundBy, "oci-attested-sbom-verified:") {
+		t.Fatalf("expected verified provenance for signed SBOM, got %+v", p)
 	}
 }
