@@ -1,0 +1,38 @@
+name: OCI attested SBOM development checks
+
+on:
+  push:
+    branches:
+      - feat/oci-attested-sbom-ingestion
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run focused unit tests
+        run: go test ./syft/ociattestation -count=1
+      - name: Run focused race tests
+        run: go test -race ./syft/ociattestation -count=1
+      - name: Run static checks
+        run: go vet ./syft/ociattestation
+      - name: Check Go formatting
+        run: |
+          unformatted="$(gofmt -l syft/ociattestation)"
+          if [ -n "$unformatted" ]; then
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
