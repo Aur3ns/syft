@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -201,4 +202,44 @@ func TestVersionedSPDXPredicates(t *testing.T) {
 			t.Fatalf("expected mismatch rejection, got %v", err)
 		}
 	})
+}
+
+func TestDiscoverSkipsOrdinarySignatureBundles(t *testing.T) {
+	for _, annotated := range []bool{true, false} {
+		t.Run(fmt.Sprint("annotated=", annotated), func(t *testing.T) {
+			f := newRegistryFixture()
+			signature := encodeJSON(t, map[string]any{"messageSignature": map[string]any{"signature": "AA=="}})
+			blobHash := contentDigest(signature)
+			f.blobs["/v2/org/repo/blobs/"+blobHash] = signature
+			m := manifest{
+				MediaType: ManifestMediaType,
+				ArtifactType: BundleMediaType,
+				Subject: &descriptor{Digest:testImageSHA},
+				Layers: []descriptor{{MediaType:BundleMediaType,Digest:blobHash,Size:int64(len(signature))}},
+			}
+			desc := descriptor{ArtifactType:BundleMediaType,MediaType:ManifestMediaType}
+			if annotated {
+				m.Annotations = map[string]string{"dev.sigstore.bundle.content":"message-signature"}
+				desc.Annotations = map[string]string{"dev.sigstore.bundle.content":"message-signature"}
+			}
+			rawManifest := encodeJSON(t,m)
+			desc.Digest = contentDigest(rawManifest)
+			desc.Size = int64(len(rawManifest))
+			f.blobs["/v2/org/repo/manifests/"+desc.Digest] = rawManifest
+			f.idx.Manifests = append(f.idx.Manifests,desc)
+			f.addSBOM(t,testImageSHA,CycloneDXPredicate,[]byte("{\"bomFormat\":\"CycloneDX\",\"specVersion\":\"1.6\"}"))
+			result,err:=fixtureClient(f.server(t)).Discover(context.Background(),testImageSHA)
+			if err!=nil || len(result)!=1 {t.Fatalf("normal signatures must be ignored, got %d results: %v",len(result),err)}
+		})
+	}
+}
+
+func TestDiscoverReferrersTagFallback(t *testing.T) {
+	f:=newRegistryFixture()
+	f.addSBOM(t,testImageSHA,CycloneDXPredicate,[]byte("{\"bomFormat\":\"CycloneDX\",\"specVersion\":\"1.6\"}"))
+	f.status["/v2/org/repo/referrers/"+testImageSHA]=http.StatusNotFound
+	tag:="sha256-"+strings.TrimPrefix(testImageSHA,"sha256:")
+	f.blobs["/v2/org/repo/manifests/"+tag]=encodeJSON(t,f.idx)
+	got,err:=fixtureClient(f.server(t)).Discover(context.Background(),testImageSHA)
+	if err!=nil || len(got)!=1 {t.Fatalf("OCI fallback failed: %v, %v",got,err)}
 }
