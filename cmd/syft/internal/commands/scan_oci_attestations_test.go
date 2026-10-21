@@ -70,3 +70,32 @@ func TestProduceScanSBOMRequiresExplicitRegistrySource(t *testing.T) {
 		}
 	}
 }
+
+func TestAttestedSBOMVerificationPolicyIsFailClosed(t *testing.T) {
+	src := source.FromDescription(source.Description{Name:"local"})
+	for _, tc := range []struct {
+		name string
+		mode string
+		verify bool
+		issuer string
+		identity string
+		want string
+	}{
+		{"cannot verify disabled import", "off", true, "issuer", "identity", "require --attested-sbom"},
+		{"missing issuer", "replacement", true, "", "identity", "requires both"},
+		{"missing identity", "additive", true, "issuer", "", "requires both"},
+		{"cannot provide identity without verification", "additive", false, "", "identity", "require --attested-sbom-verify"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := defaultScanOptions()
+			opts.AttestedSBOM = tc.mode
+			opts.AttestedSBOMVerify = tc.verify
+			opts.AttestedSBOMIssuer = tc.issuer
+			opts.AttestedSBOMIdentity = tc.identity
+			_, err := produceScanSBOM(context.Background(), clio.Identification{}, src, opts, "example.org/image", "registry")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected configuration error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
