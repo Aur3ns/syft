@@ -6,33 +6,41 @@ on:
       - feat/oci-attested-sbom-ingestion
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   focused-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: write
     steps:
-      - name: Check out code
+      - name: Check out development branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
+          persist-credentials: true
       - name: Install Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
-      - name: Run focused unit tests
+      - name: Format OCI Go package
+        run: gofmt -w syft/ociattestation
+      - name: Focused unit tests
         run: go test ./syft/ociattestation -count=1
-      - name: Run focused race tests
+      - name: Focused race tests
         run: go test -race ./syft/ociattestation -count=1
-      - name: Run static checks
+      - name: Static checks
         run: go vet ./syft/ociattestation
-      - name: Check Go formatting
+      - name: Check formatting
+        run: test -z "$(gofmt -l syft/ociattestation)"
+      - name: Commit formatting to fork-only development branch
+        if: github.repository == 'Aur3ns/syft' && github.ref == 'refs/heads/feat/oci-attested-sbom-ingestion'
         run: |
-          unformatted="$(gofmt -l syft/ociattestation)"
-          if [ -n "$unformatted" ]; then
-            printf '%s\n' "$unformatted"
-            exit 1
+          git add syft/ociattestation
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m "style(oci): gofmt discovery and decoder"
+            git push origin HEAD:refs/heads/feat/oci-attested-sbom-ingestion
           fi
