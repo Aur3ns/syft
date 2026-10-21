@@ -67,6 +67,7 @@ func (f *registryFixture) server(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet { t.Errorf("unexpected method %s",r.Method) }
+		if r.URL.Path == "/v2/" { w.WriteHeader(http.StatusOK); return }
 		if code, ok := f.status[r.URL.Path]; ok { w.WriteHeader(code); return }
 		if r.URL.Path == "/v2/org/repo/referrers/"+testImageSHA {
 			_,_ = w.Write(encodeJSON(t,f.idx))
