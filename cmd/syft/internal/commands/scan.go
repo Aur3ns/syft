@@ -75,6 +75,8 @@ type scanOptions struct {
 	options.Catalog     `yaml:",inline" mapstructure:",squash"`
 	Cache               options.Cache `json:"-" yaml:"cache" mapstructure:"cache"`
 	AttestedSBOM        string        `json:"attested-sbom" yaml:"attested-sbom" mapstructure:"attested-sbom"`
+	AttestedSBOMIssuer string `json:"attested-sbom-issuer" yaml:"attested-sbom-issuer" mapstructure:"attested-sbom-issuer"`
+	AttestedSBOMIdentity string `json:"attested-sbom-identity" yaml:"attested-sbom-identity" mapstructure:"attested-sbom-identity"`
 }
 
 func defaultScanOptions() *scanOptions {
@@ -109,6 +111,8 @@ func Scan(app clio.Application) *cobra.Command {
 		},
 	}, opts)
 	cmd.Flags().StringVar(&opts.AttestedSBOM, "attested-sbom", "off",
+	cmd.Flags().StringVar(&opts.AttestedSBOMIssuer, "attested-sbom-issuer", "", "require Sigstore Fulcio certificate OIDC issuer; must be paired with --attested-sbom-identity")
+	cmd.Flags().StringVar(&opts.AttestedSBOMIdentity, "attested-sbom-identity", "", "require exact Sigstore Fulcio certificate identity; must be paired with --attested-sbom-issuer")
 		"import OCI-attested SBOMs (off, additive, replacement); OCI digests are checked, cryptographic signatures are NOT verified")
 	return cmd
 }
