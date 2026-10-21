@@ -40,7 +40,7 @@ func TestProduceScanSBOMReplacementDoesNotSilentlyFallBackToScan(t *testing.T) {
 	opts := defaultScanOptions()
 	opts.Registry.InsecureUseHTTP = true
 	opts.AttestedSBOM = "replacement"
-	_, err := produceScanSBOM(context.Background(), clio.Identification{Name: "syft"}, src, opts, imageRef)
+	_, err := produceScanSBOM(context.Background(), clio.Identification{Name: "syft"}, src, opts, imageRef, "registry")
 	if err == nil || !strings.Contains(err.Error(), "no usable attested SBOM") {
 		t.Fatalf("replacement must fail if registry has no SBOM; got %v", err)
 	}
@@ -50,7 +50,7 @@ func TestProduceScanSBOMRejectsNonImageSources(t *testing.T) {
 	opts := defaultScanOptions()
 	opts.AttestedSBOM = "replacement"
 	src := source.FromDescription(source.Description{Name: "filesystem"})
-	_, err := produceScanSBOM(context.Background(), clio.Identification{Name: "syft"}, src, opts, "dir:/example")
+	_, err := produceScanSBOM(context.Background(), clio.Identification{Name: "syft"}, src, opts, "dir:/example", "registry")
 	if err == nil || !strings.Contains(err.Error(), "container images") {
 		t.Fatalf("expected image-only validation, got %v", err)
 	}
