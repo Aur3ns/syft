@@ -82,7 +82,7 @@ unverified SBOM**. Syft never automatically trusts a certificate identity
 taken from the untrusted bundle or from the OCI registry annotations.
 
 In verified mode imported packages carry a provenance label beginning
-\`oci-attested-sbom-verified:\`, instead of \`oci-attested-sbom-unverified:\`.
+`oci-attested-sbom-verified:`, instead of `oci-attested-sbom-unverified:`.
 All independently scanned packages keep their own cataloger provenance.
 Verification checks **who signed the statement** and **which image digest
 was attested**, but does *not* prove that the package inventory asserted by
@@ -107,15 +107,16 @@ go test ./cmd/syft/internal/commands -run TestProduceScanSBOM -count=1
 go vet ./syft/ociattestation ./cmd/syft/internal/commands
 ~~~
 
-Known limitations to resolve before upstream delivery:
-- Signature, Fulcio identity and transparency-log verification not implemented.
+Known limitations requiring maintainer discussion:
+- Verified mode requires an exact signing identity and the Sigstore Public
+  Good trust root; self-hosted Sigstore deployments are not yet configurable.
+- Cryptographic verification establishes signer identity and subject binding,
+  not the factual accuracy or completeness of the SBOM.
 - Cross-document relationship and provenance encoding across all export formats
   requires maintainer review.
 - Multi-architecture images whose attestations target an index digest instead
   of the resolved platform manifest require validation.
-- Integration testing against a real GHCR GitHub Actions SBOM attestation
-  is still required.
-- The temporary fork-only development workflow must be dropped before a
-  clean upstream PR.
+- The fork-only development workflow and temporary dependency-resolution commits
+  must not be included in a final upstream submission.
 
 See https://github.com/anchore/grype/issues/3604 for project background.
