@@ -76,6 +76,7 @@ type index struct {
 type manifest struct {
 	MediaType    string       `json:"mediaType"`
 	ArtifactType string       `json:"artifactType"`
+	Annotations  map[string]string `json:"annotations"`
 	Subject      *descriptor  `json:"subject"`
 	Layers       []descriptor `json:"layers"`
 }
@@ -143,6 +144,9 @@ func (c *Client) Discover(ctx context.Context, imageDigest string) ([]Result, er
 		if desc.ArtifactType != "" && desc.ArtifactType != BundleMediaType {
 			continue
 		}
+		if desc.Annotations["dev.sigstore.bundle.content"] == "message-signature" {
+			continue // Ordinary signature bundles are not SBOM attestations.
+		}
 		predHint := desc.Annotations["dev.sigstore.bundle.predicateType"]
 		if predHint != "" && !isSBOMPredicate(predHint) {
 			continue
@@ -174,6 +178,9 @@ func (c *Client) Discover(ctx context.Context, imageDigest string) ([]Result, er
 			return nil, fmt.Errorf("unsupported OCI manifest media type %q", m.MediaType)
 		}
 		if m.ArtifactType != "" && m.ArtifactType != BundleMediaType {
+			continue
+		}
+		if m.Annotations["dev.sigstore.bundle.content"] == "message-signature" {
 			continue
 		}
 		if m.Subject == nil || m.Subject.Digest != imageDigest {
@@ -286,7 +293,13 @@ func (c *Client) request(ctx context.Context, origin *url.URL, path string, limi
 func decodeBundle(raw []byte, imageDigest, artifactDigest string) (Result, bool, error) {
 	var b bundle
 	if err := json.Unmarshal(raw, &b); err != nil { return Result{}, false, err }
-	if b.DSSEEnvelope.Payload == "" { return Result{}, false, errors.New("Sigstore bundle is missing DSSE payload") }
+	if b.DSSEEnvelope.Payload == "" {
+		var other struct { MessageSignature json.RawMessage `json:"messageSignature"` }
+		if json.Unmarshal(raw, &other) == nil && len(other.MessageSignature) > 0 && string(other.MessageSignature) != "null" {
+			return Result{}, false, nil // A non-attestation Sigstore signature bundle.
+		}
+		return Result{}, false, errors.New("Sigstore bundle is missing DSSE payload")
+	}
 	if b.DSSEEnvelope.PayloadType != DSSEPayloadType { return Result{}, false, fmt.Errorf("unsupported DSSE payload type %q", b.DSSEEnvelope.PayloadType) }
 	payload, err := base64.StdEncoding.Strict().DecodeString(b.DSSEEnvelope.Payload)
 	if err != nil { return Result{}, false, fmt.Errorf("invalid DSSE base64 payload: %w", err) }
