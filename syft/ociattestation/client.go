@@ -111,21 +111,9 @@ func (c *Client) Discover(ctx context.Context, imageDigest string) ([]Result, er
 	if err != nil {
 		return nil, fmt.Errorf("invalid registry URL: %w", err)
 	}
-	contents, notFound, err := c.request(ctx, base, "/v2/"+c.Repository+"/referrers/"+imageDigest, c.indexLimit(), "", true)
-	if err != nil {
-		return nil, fmt.Errorf("list OCI referrers: %w", err)
-	}
-	if notFound {
-		// OCI 1.1 registries without the referrers endpoint use the
-		// referrers-tag fallback defined by the OCI distribution spec.
-		referrersTag := strings.Replace(imageDigest, ":", "-", 1)
-		contents, notFound, err = c.request(ctx, base, "/v2/"+c.Repository+"/manifests/"+referrersTag, c.indexLimit(), "", true)
-		if err != nil {
-			return nil, fmt.Errorf("get OCI referrers fallback tag: %w", err)
-		}
-		if notFound {
-			return nil, nil
-		}
+	contents, err := c.fetchReferrersIndex(ctx, base, imageDigest)
+	if err != nil || contents == nil {
+		return nil, err
 	}
 	remaining := c.totalLimit() - int64(len(contents))
 	if remaining < 0 {
@@ -138,87 +126,140 @@ func (c *Client) Discover(ctx context.Context, imageDigest string) ([]Result, er
 	if len(idx.Manifests) > maxAttestations {
 		return nil, fmt.Errorf("too many OCI referrers: %d > %d", len(idx.Manifests), maxAttestations)
 	}
+	return c.scanReferrers(ctx, base, imageDigest, idx.Manifests, remaining)
+}
+
+func (c *Client) fetchReferrersIndex(ctx context.Context, base *url.URL, digest string) ([]byte, error) {
+	contents, missing, err := c.request(ctx, base, "/v2/"+c.Repository+"/referrers/"+digest, c.indexLimit(), "", true)
+	if err != nil {
+		return nil, fmt.Errorf("list OCI referrers: %w", err)
+	}
+	if !missing {
+		return contents, nil
+	}
+	// OCI 1.1 specifies this tag fallback for registries without /referrers.
+	tag := strings.Replace(digest, ":", "-", 1)
+	contents, missing, err = c.request(ctx, base, "/v2/"+c.Repository+"/manifests/"+tag, c.indexLimit(), "", true)
+	if err != nil {
+		return nil, fmt.Errorf("get OCI referrers fallback tag: %w", err)
+	}
+	if missing {
+		return nil, nil
+	}
+	return contents, nil
+}
+
+func eligibleSBOMReferrer(desc descriptor) bool {
+	if desc.ArtifactType != "" && desc.ArtifactType != BundleMediaType {
+		return false
+	}
+	if desc.Annotations["dev.sigstore.bundle.content"] == "message-signature" {
+		return false
+	}
+	hint := desc.Annotations["dev.sigstore.bundle.predicateType"]
+	if hint != "" && !isSBOMPredicate(hint) {
+		return false
+	}
+	return desc.ArtifactType != "" || desc.Annotations["dev.sigstore.bundle.content"] == "dsse-envelope"
+}
+
+func (c *Client) scanReferrers(ctx context.Context, base *url.URL, digest string, entries []descriptor, budget int64) ([]Result, error) {
 	results := make([]Result, 0)
-	seen := make(map[string]bool)
-	for _, desc := range idx.Manifests {
-		if desc.ArtifactType != "" && desc.ArtifactType != BundleMediaType {
+	seen := make(map[string]struct{})
+	for _, desc := range entries {
+		if !eligibleSBOMReferrer(desc) {
 			continue
 		}
-		if desc.Annotations["dev.sigstore.bundle.content"] == "message-signature" {
-			continue // Ordinary signature bundles are not SBOM attestations.
-		}
-		predHint := desc.Annotations["dev.sigstore.bundle.predicateType"]
-		if predHint != "" && !isSBOMPredicate(predHint) {
+		if _, exists := seen[desc.Digest]; exists {
 			continue
 		}
-		if desc.ArtifactType == "" && desc.Annotations["dev.sigstore.bundle.content"] != "dsse-envelope" {
-			continue
-		}
-		if seen[desc.Digest] {
-			continue
-		}
-		seen[desc.Digest] = true
-		limit := min(c.manifestLimit(), remaining)
-		if err := checkDescriptor(desc, limit); err != nil {
+		seen[desc.Digest] = struct{}{}
+		imported, err := c.fetchReferrer(ctx, base, digest, desc, &budget)
+		if err != nil {
 			return nil, err
 		}
-		manifestBytes, _, err := c.request(ctx, base, "/v2/"+c.Repository+"/manifests/"+desc.Digest, limit, desc.Digest, false)
+		results = append(results, imported...)
+	}
+	return results, nil
+}
+
+func (c *Client) fetchReferrer(ctx context.Context, base *url.URL, digest string, desc descriptor, budget *int64) ([]Result, error) {
+	limit := min(c.manifestLimit(), *budget)
+	if err := checkDescriptor(desc, limit); err != nil {
+		return nil, err
+	}
+	contents, _, err := c.request(ctx, base, "/v2/"+c.Repository+"/manifests/"+desc.Digest, limit, desc.Digest, false)
+	if err != nil {
+		return nil, fmt.Errorf("fetch referrer %s: %w", desc.Digest, err)
+	}
+	*budget -= int64(len(contents))
+	if int64(len(contents)) != desc.Size {
+		return nil, fmt.Errorf("OCI referrer descriptor size mismatch for %s", desc.Digest)
+	}
+	var m manifest
+	if err := json.Unmarshal(contents, &m); err != nil {
+		return nil, fmt.Errorf("decode referrer manifest %s: %w", desc.Digest, err)
+	}
+	if m.ArtifactType != "" && m.ArtifactType != BundleMediaType {
+		return nil, nil
+	}
+	if m.Annotations["dev.sigstore.bundle.content"] == "message-signature" {
+		return nil, nil
+	}
+	if err := validateReferrerManifest(m, digest, desc.Digest); err != nil {
+		return nil, err
+	}
+	results := make([]Result, 0, len(m.Layers))
+	hint := desc.Annotations["dev.sigstore.bundle.predicateType"]
+	for _, layer := range m.Layers {
+		if layer.MediaType != BundleMediaType {
+			continue
+		}
+		result, compatible, err := c.fetchSBOMLayer(ctx, base, digest, desc.Digest, hint, layer, budget)
 		if err != nil {
-			return nil, fmt.Errorf("fetch referrer %s: %w", desc.Digest, err)
+			return nil, err
 		}
-		remaining -= int64(len(manifestBytes))
-		if int64(len(manifestBytes)) != desc.Size {
-			return nil, fmt.Errorf("OCI referrer descriptor size mismatch for %s", desc.Digest)
-		}
-		var m manifest
-		if err := json.Unmarshal(manifestBytes, &m); err != nil {
-			return nil, fmt.Errorf("decode referrer manifest %s: %w", desc.Digest, err)
-		}
-		if m.MediaType != "" && m.MediaType != ManifestMediaType {
-			return nil, fmt.Errorf("unsupported OCI manifest media type %q", m.MediaType)
-		}
-		if m.ArtifactType != "" && m.ArtifactType != BundleMediaType {
-			continue
-		}
-		if m.Annotations["dev.sigstore.bundle.content"] == "message-signature" {
-			continue
-		}
-		if m.Subject == nil || m.Subject.Digest != imageDigest {
-			return nil, fmt.Errorf("OCI referrer %s is not attached to image digest %s", desc.Digest, imageDigest)
-		}
-		if len(m.Layers) == 0 || len(m.Layers) > 8 {
-			return nil, fmt.Errorf("OCI referrer %s contains invalid layer count %d", desc.Digest, len(m.Layers))
-		}
-		for _, layer := range m.Layers {
-			if layer.MediaType != BundleMediaType {
-				continue
-			}
-			limit := min(c.blobLimit(), remaining)
-			if err := checkDescriptor(layer, limit); err != nil {
-				return nil, err
-			}
-			b, _, err := c.request(ctx, base, "/v2/"+c.Repository+"/blobs/"+layer.Digest, limit, layer.Digest, false)
-			if err != nil {
-				return nil, fmt.Errorf("fetch SBOM bundle %s: %w", layer.Digest, err)
-			}
-			remaining -= int64(len(b))
-			if int64(len(b)) != layer.Size {
-				return nil, fmt.Errorf("OCI blob descriptor size mismatch for %s", layer.Digest)
-			}
-			result, compatible, err := decodeBundle(b, imageDigest, desc.Digest)
-			if err != nil {
-				return nil, fmt.Errorf("decode SBOM bundle %s: %w", layer.Digest, err)
-			}
-			if !compatible {
-				continue
-			}
-			if predHint != "" && predHint != result.PredicateType {
-				return nil, errors.New("referrer annotation does not match attested predicate type")
-			}
+		if compatible {
 			results = append(results, result)
 		}
 	}
 	return results, nil
+}
+
+func validateReferrerManifest(m manifest, imageDigest, artifactDigest string) error {
+	if m.MediaType != "" && m.MediaType != ManifestMediaType {
+		return fmt.Errorf("unsupported OCI manifest media type %q", m.MediaType)
+	}
+	if m.Subject == nil || m.Subject.Digest != imageDigest {
+		return fmt.Errorf("OCI referrer %s is not attached to image digest %s", artifactDigest, imageDigest)
+	}
+	if len(m.Layers) == 0 || len(m.Layers) > 8 {
+		return fmt.Errorf("OCI referrer %s contains invalid layer count %d", artifactDigest, len(m.Layers))
+	}
+	return nil
+}
+
+func (c *Client) fetchSBOMLayer(ctx context.Context, base *url.URL, digest, artifactDigest, hint string, layer descriptor, budget *int64) (Result, bool, error) {
+	limit := min(c.blobLimit(), *budget)
+	if err := checkDescriptor(layer, limit); err != nil {
+		return Result{}, false, err
+	}
+	contents, _, err := c.request(ctx, base, "/v2/"+c.Repository+"/blobs/"+layer.Digest, limit, layer.Digest, false)
+	if err != nil {
+		return Result{}, false, fmt.Errorf("fetch SBOM bundle %s: %w", layer.Digest, err)
+	}
+	*budget -= int64(len(contents))
+	if int64(len(contents)) != layer.Size {
+		return Result{}, false, fmt.Errorf("OCI blob descriptor size mismatch for %s", layer.Digest)
+	}
+	result, compatible, err := decodeBundle(contents, digest, artifactDigest)
+	if err != nil || !compatible {
+		return result, compatible, err
+	}
+	if hint != "" && hint != result.PredicateType {
+		return Result{}, false, errors.New("referrer annotation does not match attested predicate type")
+	}
+	return result, true, nil
 }
 
 func (c *Client) validate() error {
@@ -328,7 +369,7 @@ func decodeBundle(raw []byte, imageDigest, artifactDigest string) (Result, bool,
 		if json.Unmarshal(raw, &other) == nil && len(other.MessageSignature) > 0 && string(other.MessageSignature) != "null" {
 			return Result{}, false, nil // A non-attestation Sigstore signature bundle.
 		}
-		return Result{}, false, errors.New("Sigstore bundle is missing DSSE payload")
+		return Result{}, false, errors.New("sigstore bundle is missing DSSE payload")
 	}
 	if b.DSSEEnvelope.PayloadType != DSSEPayloadType {
 		return Result{}, false, fmt.Errorf("unsupported DSSE payload type %q", b.DSSEEnvelope.PayloadType)
