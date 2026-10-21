@@ -18,6 +18,9 @@ import (
 func produceScanSBOM(ctx context.Context, id clio.Identification, src source.Source, opts *scanOptions, userInput string, selectedSources ...string) (*sbom.SBOM, error) {
 	mode := opts.AttestedSBOM
 	if mode == "" || mode == "off" {
+		if opts.AttestedSBOMIssuer != "" || opts.AttestedSBOMIdentity != "" {
+			return nil, fmt.Errorf("Sigstore verification options require --attested-sbom=additive or replacement")
+		}
 		return generateSBOM(ctx, id, src, &opts.Catalog)
 	}
 	if mode != string(ociattestation.AdditiveMode) && mode != string(ociattestation.ReplacementMode) {
@@ -47,12 +50,19 @@ func produceScanSBOM(ctx context.Context, id clio.Identification, src source.Sou
 	}
 	// The resolver already selected this image digest. Discovery must not
 	// resolve a mutable tag a second time, even when registry tags move.
-	documents, err := ociattestation.Import(ctx, userInput, src.Describe(), opts.Registry.ToOptions())
+	var verifier *ociattestation.SigstoreVerifier
+	if opts.AttestedSBOMIssuer != "" || opts.AttestedSBOMIdentity != "" {
+		verifier, err = ociattestation.NewSigstoreVerifier(ociattestation.TrustPolicy{
+			Issuer: opts.AttestedSBOMIssuer, Identity: opts.AttestedSBOMIdentity,
+		})
+		if err != nil { return nil, fmt.Errorf("configure attestation verification: %w", err) }
+	}
+	documents, err := ociattestation.ImportWithVerifier(ctx, userInput, src.Describe(), opts.Registry.ToOptions(), verifier)
 	if err != nil {
 		return nil, fmt.Errorf("unable to import OCI-attested SBOM: %w", err)
 	}
-	if len(documents) > 0 {
-		log.Warnf("importing %d OCI-attested SBOM(s): OCI content integrity checked but cryptographic signatures NOT verified", len(documents))
+	if len(documents) > 0 && verifier == nil {
+		log.Warnf("importing %d OCI-attested SBOM(s): signatures NOT verified (configure issuer and identity to enable verification)", len(documents))
 	}
 	return ociattestation.Combine(base, documents, ociattestation.Mode(mode))
 }
