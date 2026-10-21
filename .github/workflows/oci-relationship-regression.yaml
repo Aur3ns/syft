@@ -34,6 +34,8 @@ jobs:
         run: go test -race ./syft/ociattestation ./cmd/syft/internal/commands -run 'Test(Combine|ProduceScanSBOM|Discover|DecodeSBOMs|NewClientForImage)' -count=1
       - name: Static analysis
         run: go vet ./syft/ociattestation ./cmd/syft/internal/commands
+      - name: Syft official static analysis
+        run: make static-analysis
       - name: Commit formatting to isolated fork branch
         run: |
           git add syft/ociattestation cmd/syft/internal/commands/scan_oci_attestations.go cmd/syft/internal/commands/scan_oci_attestations_test.go
