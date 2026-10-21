@@ -1,0 +1,57 @@
+package commands
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/anchore/clio"
+	"github.com/anchore/syft/syft/source"
+)
+
+const testResolvedImageDigest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+func TestProduceScanSBOMRejectsUnknownMode(t *testing.T) {
+	opts := defaultScanOptions()
+	opts.AttestedSBOM = "unknown"
+	src := source.FromDescription(source.Description{Name: "test"})
+	_, err := produceScanSBOM(context.Background(), clio.Identification{}, src, opts, "example.test/image:latest")
+	if err == nil || !strings.Contains(err.Error(), "invalid --attested-sbom") {
+		t.Fatalf("expected helpful mode error, got %v", err)
+	}
+}
+
+func TestProduceScanSBOMReplacementDoesNotSilentlyFallBackToScan(t *testing.T) {
+	registry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(registry.Close)
+	imageRef := strings.TrimPrefix(registry.URL, "http://") + "/org/repo:latest"
+	src := source.FromDescription(source.Description{
+		Name: imageRef,
+		Metadata: source.ImageMetadata{ManifestDigest: testResolvedImageDigest, UserInput: imageRef},
+	})
+	opts := defaultScanOptions()
+	opts.Registry.InsecureUseHTTP = true
+	opts.AttestedSBOM = "replacement"
+	_, err := produceScanSBOM(context.Background(), clio.Identification{Name: "syft"}, src, opts, imageRef)
+	if err == nil || !strings.Contains(err.Error(), "no usable attested SBOM") {
+		t.Fatalf("replacement must fail if registry has no SBOM; got %v", err)
+	}
+}
+
+func TestProduceScanSBOMRejectsNonImageSources(t *testing.T) {
+	opts := defaultScanOptions()
+	opts.AttestedSBOM = "replacement"
+	src := source.FromDescription(source.Description{Name: "filesystem"})
+	_, err := produceScanSBOM(context.Background(), clio.Identification{Name: "syft"}, src, opts, "dir:/example")
+	if err == nil || !strings.Contains(err.Error(), "container images") {
+		t.Fatalf("expected image-only validation, got %v", err)
+	}
+}
