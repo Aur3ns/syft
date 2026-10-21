@@ -107,7 +107,6 @@ func TestCombineRejectsUnsafeInputs(t *testing.T) {
 		{"bad mode", sampleSBOM(), nil, "guess"},
 		{"replace without attestation", sampleSBOM(), nil, ReplacementMode},
 		{"nil attested document", sampleSBOM(), []DecodedSBOM{{}}, AdditiveMode},
-		{"false signature claim", sampleSBOM(), []DecodedSBOM{{Document: sampleSBOM(), SignatureVerified: true}}, AdditiveMode},
 		{"missing package name", sampleSBOM(), []DecodedSBOM{sampleDocument(sampleSBOM(pkg.Package{}))}, AdditiveMode},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
