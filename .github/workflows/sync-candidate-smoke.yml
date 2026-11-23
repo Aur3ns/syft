@@ -20,3 +20,7 @@ jobs:
           cache: true
       - name: OCI attestation tests and command compilation
         run: go test -count=1 ./syft/ociattestation ./cmd/syft/internal/commands
+      - name: OCI race detector
+        run: go test -race -count=1 ./syft/ociattestation
+      - name: Go vet on OCI integration
+        run: go vet ./syft/ociattestation ./cmd/syft/internal/commands
