@@ -1,0 +1,22 @@
+name: Candidate smoke - Syft OCI
+on:
+  push:
+    branches:
+      - sync/syft-2026-11-23-candidate
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  oci-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: OCI attestation tests and command compilation
+        run: go test -count=1 ./syft/ociattestation ./cmd/syft/internal/commands
